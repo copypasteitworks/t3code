@@ -1,7 +1,12 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import { assertSuccess } from "@effect/vitest/utils";
 import { FileSystem, Path, Effect } from "effect";
+import { describe } from "vitest";
 
 import {
   isCommandAvailable,

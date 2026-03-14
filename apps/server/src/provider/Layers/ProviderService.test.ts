@@ -239,7 +239,7 @@ function makeProviderServiceLayer() {
         Layer.provideMerge(AnalyticsService.layerTest),
       ),
       directoryLayer,
-
+      SqlitePersistenceMemory,
       runtimeRepositoryLayer,
       NodeServices.layer,
     ),
@@ -592,6 +592,46 @@ routing.layer("ProviderServiceLive routing", (it) => {
 
       const remaining = yield* provider.listSessions();
       assert.equal(remaining.length, 0);
+    }),
+  );
+
+  it.effect("skips malformed persisted runtime rows when listing sessions", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService;
+      const sql = yield* SqlClient.SqlClient;
+
+      const session = yield* provider.startSession(asThreadId("thread-1"), {
+        provider: "codex",
+        threadId: asThreadId("thread-1"),
+        runtimeMode: "full-access",
+      });
+
+      yield* sql`
+        INSERT INTO provider_session_runtime (
+          thread_id,
+          provider_name,
+          adapter_key,
+          runtime_mode,
+          status,
+          last_seen_at,
+          resume_cursor_json,
+          runtime_payload_json
+        )
+        VALUES (
+          ${"thread-corrupt"},
+          ${"codex"},
+          ${"codex"},
+          ${"full-access"},
+          ${"running"},
+          ${new Date().toISOString()},
+          ${"{bad-json"},
+          ${null}
+        )
+      `;
+
+      const sessions = yield* provider.listSessions();
+      assert.equal(sessions.length, 1);
+      assert.equal(sessions[0]?.threadId, session.threadId);
     }),
   );
 

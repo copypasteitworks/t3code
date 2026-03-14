@@ -6,7 +6,7 @@ import {
   useNavigate,
   useRouterState,
 } from "@tanstack/react-router";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { QueryClient, useQueryClient } from "@tanstack/react-query";
 import { Throttler } from "@tanstack/react-pacer";
 
@@ -36,6 +36,9 @@ export const Route = createRootRouteWithContext<{
 });
 
 function RootRouteView() {
+  const [bootstrapFailure, setBootstrapFailure] = useState<unknown>(null);
+  const [bootstrapRetryNonce, setBootstrapRetryNonce] = useState(0);
+
   if (!readNativeApi()) {
     return (
       <div className="flex h-screen flex-col bg-background text-foreground">
@@ -51,18 +54,87 @@ function RootRouteView() {
   return (
     <ToastProvider>
       <AnchoredToastProvider>
-        <EventRouter />
+        <EventRouter
+          bootstrapRetryNonce={bootstrapRetryNonce}
+          onBootstrapReady={() => setBootstrapFailure(null)}
+          onBootstrapFailure={setBootstrapFailure}
+        />
         <DesktopProjectBootstrap />
-        <Outlet />
+        {bootstrapFailure ? (
+          <FatalBootstrapErrorView
+            error={bootstrapFailure}
+            onRetry={() => {
+              setBootstrapFailure(null);
+              setBootstrapRetryNonce((value) => value + 1);
+            }}
+          />
+        ) : (
+          <Outlet />
+        )}
       </AnchoredToastProvider>
     </ToastProvider>
   );
 }
 
 function RootRouteErrorView({ error, reset }: ErrorComponentProps) {
-  const message = errorMessage(error);
-  const details = errorDetails(error);
+  return (
+    <FatalErrorScreen
+      title="Something went wrong."
+      message={errorMessage(error)}
+      details={errorDetails(error)}
+      primaryAction={
+        <Button size="sm" onClick={() => reset()}>
+          Try again
+        </Button>
+      }
+      secondaryAction={
+        <Button size="sm" variant="outline" onClick={() => window.location.reload()}>
+          Reload app
+        </Button>
+      }
+    />
+  );
+}
 
+export function FatalBootstrapErrorView({
+  error,
+  onRetry,
+}: {
+  error: unknown;
+  onRetry: () => void;
+}) {
+  return (
+    <FatalErrorScreen
+      title="Unable to initialize app state."
+      message={errorMessage(error)}
+      details={errorDetails(error)}
+      primaryAction={
+        <Button size="sm" onClick={onRetry}>
+          Retry bootstrap
+        </Button>
+      }
+      secondaryAction={
+        <Button size="sm" variant="outline" onClick={() => window.location.reload()}>
+          Reload app
+        </Button>
+      }
+    />
+  );
+}
+
+function FatalErrorScreen({
+  title,
+  message,
+  details,
+  primaryAction,
+  secondaryAction,
+}: {
+  title: string;
+  message: string;
+  details: string;
+  primaryAction: React.ReactNode;
+  secondaryAction?: React.ReactNode;
+}) {
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4 py-10 text-foreground sm:px-6">
       <div className="pointer-events-none absolute inset-0 opacity-80">
@@ -74,18 +146,12 @@ function RootRouteErrorView({ error, reset }: ErrorComponentProps) {
         <p className="text-[11px] font-semibold tracking-[0.18em] text-muted-foreground uppercase">
           {APP_DISPLAY_NAME}
         </p>
-        <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">
-          Something went wrong.
-        </h1>
+        <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">{title}</h1>
         <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{message}</p>
 
         <div className="mt-5 flex flex-wrap gap-2">
-          <Button size="sm" onClick={() => reset()}>
-            Try again
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => window.location.reload()}>
-            Reload app
-          </Button>
+          {primaryAction}
+          {secondaryAction}
         </div>
 
         <details className="group mt-5 overflow-hidden rounded-lg border border-border/70 bg-background/55">
@@ -130,7 +196,15 @@ function errorDetails(error: unknown): string {
   }
 }
 
-function EventRouter() {
+function EventRouter({
+  bootstrapRetryNonce,
+  onBootstrapReady,
+  onBootstrapFailure,
+}: {
+  bootstrapRetryNonce: number;
+  onBootstrapReady: () => void;
+  onBootstrapFailure: (error: unknown) => void;
+}) {
   const syncServerReadModel = useStore((store) => store.syncServerReadModel);
   const setProjectExpanded = useStore((store) => store.setProjectExpanded);
   const removeOrphanedTerminalStates = useTerminalStateStore(
@@ -153,6 +227,12 @@ function EventRouter() {
     let pending = false;
     let needsProviderInvalidation = false;
 
+    const reportBootstrapFailure = (error: unknown) => {
+      if (!useStore.getState().threadsHydrated) {
+        onBootstrapFailure(error);
+      }
+    };
+
     const flushSnapshotSync = async (): Promise<void> => {
       const snapshot = await api.orchestration.getSnapshot();
       if (disposed) return;
@@ -167,6 +247,7 @@ function EventRouter() {
         draftThreadIds,
       });
       removeOrphanedTerminalStates(activeThreadIds);
+      onBootstrapReady();
       if (pending) {
         pending = false;
         await flushSnapshotSync();
@@ -182,8 +263,8 @@ function EventRouter() {
       pending = false;
       try {
         await flushSnapshotSync();
-      } catch {
-        // Keep prior state and wait for next domain event to trigger a resync.
+      } catch (error) {
+        reportBootstrapFailure(error);
       }
       syncing = false;
     };
@@ -312,10 +393,13 @@ function EventRouter() {
     };
   }, [
     navigate,
+    onBootstrapFailure,
+    onBootstrapReady,
     queryClient,
     removeOrphanedTerminalStates,
     setProjectExpanded,
     syncServerReadModel,
+    bootstrapRetryNonce,
   ]);
 
   return null;

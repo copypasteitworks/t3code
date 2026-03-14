@@ -160,6 +160,10 @@ const RECOVERABLE_THREAD_RESUME_ERROR_SNIPPETS = [
   "no such thread",
   "unknown thread",
   "does not exist",
+  "state db missing rollout path",
+  "state db record_discrepancy: find_thread_path_by_id_str_in_subdir",
+  "no rollout found for conversation id",
+  "no rollout found for thread id",
 ];
 const CODEX_DEFAULT_MODEL = "gpt-5.3-codex";
 const CODEX_SPARK_MODEL = "gpt-5.3-codex-spark";

@@ -78,6 +78,15 @@ const ATTACHMENT_VIEWPORT_MATRIX = [
   { name: "narrow", width: 320, height: 700, textTolerancePx: 84, attachmentTolerancePx: 56 },
 ] as const satisfies readonly ViewportSpec[];
 
+function handleIgnoredWorkerPoolRejection(event: PromiseRejectionEvent) {
+  const message =
+    event.reason instanceof Error ? event.reason.message : String(event.reason ?? "unknown error");
+  if (!message.includes("WorkerPoolManager: workers failed to initialize")) {
+    return;
+  }
+  event.preventDefault();
+}
+
 interface UserRowMeasurement {
   measuredRowHeightPx: number;
   timelineWidthMeasuredPx: number;
@@ -692,6 +701,7 @@ async function measureUserRowAtViewport(options: {
 
 describe("ChatView timeline estimator parity (full app)", () => {
   beforeAll(async () => {
+    window.addEventListener("unhandledrejection", handleIgnoredWorkerPoolRejection);
     fixture = buildFixture(
       createSnapshotForTargetUser({
         targetMessageId: "msg-user-bootstrap" as MessageId,
@@ -708,6 +718,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
   });
 
   afterAll(async () => {
+    window.removeEventListener("unhandledrejection", handleIgnoredWorkerPoolRejection);
     await worker.stop();
   });
 

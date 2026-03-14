@@ -14,6 +14,7 @@ build/
 release/
 .t3
 .idea/
+.gitconfig.local
 apps/web/.playwright
 apps/web/playwright-report
 apps/web/src/components/__screenshots__

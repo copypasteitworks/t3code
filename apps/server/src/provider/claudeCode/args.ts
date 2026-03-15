@@ -125,7 +125,7 @@ export function buildClaudeCodeTurnInputLine(
   input: BuildClaudeCodeTurnInputLineInput,
 ): string {
   return JSON.stringify({
-    type: "user_message",
+    type: "user",
     message: {
       role: "user",
       content: [

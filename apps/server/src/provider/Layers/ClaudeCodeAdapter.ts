@@ -407,27 +407,30 @@ export const makeClaudeCodeAdapterLive = (options?: ClaudeCodeAdapterLiveOptions
               ),
             );
             let stdoutBuffer = "";
+            const handleStdoutLine = (line: string) => {
+              const parsed = parseClaudeCodeStreamJsonLine(line);
+              if (!parsed) return;
+              if (parsed.kind === "session" && parsed.sessionId) {
+                session.sessionId = parsed.sessionId;
+                updateSessionTimestamp(session);
+                return;
+              }
+              if (parsed.kind === "result") {
+                session.lastCompletedTurnAt = nowIso();
+                if (parsed.model) {
+                  session.model = parsed.model;
+                }
+              }
+              void Effect.runPromise(
+                emit(...mapClaudeCodeStdoutEvent({ threadId: input.threadId, turnId, parsed })),
+              );
+            };
             child.stdout.on("data", (chunk) => {
               stdoutBuffer += chunk.toString("utf8");
               const lines = stdoutBuffer.split("\n");
               stdoutBuffer = lines.pop() ?? "";
               for (const line of lines) {
-                const parsed = parseClaudeCodeStreamJsonLine(line);
-                if (!parsed) continue;
-                if (parsed.kind === "session" && parsed.sessionId) {
-                  session.sessionId = parsed.sessionId;
-                  updateSessionTimestamp(session);
-                  continue;
-                }
-                if (parsed.kind === "result") {
-                  session.lastCompletedTurnAt = nowIso();
-                  if (parsed.model) {
-                    session.model = parsed.model;
-                  }
-                }
-                void Effect.runPromise(
-                  emit(...mapClaudeCodeStdoutEvent({ threadId: input.threadId, turnId, parsed })),
-                );
+                handleStdoutLine(line);
               }
             });
             child.stderr.on("data", (chunk) => {
@@ -448,6 +451,10 @@ export const makeClaudeCodeAdapterLive = (options?: ClaudeCodeAdapterLiveOptions
               );
             });
             child.on("close", async (code, signal) => {
+              if (stdoutBuffer.trim().length > 0) {
+                handleStdoutLine(stdoutBuffer);
+                stdoutBuffer = "";
+              }
               delete session.activeTurn;
               session.updatedAt = nowIso();
               const turnState = turnStateByThreadId.get(input.threadId);

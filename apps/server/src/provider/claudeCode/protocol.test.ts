@@ -10,6 +10,28 @@ describe("parseClaudeCodeStreamJsonLine", () => {
     });
   });
 
+  it("parses assistant messages from Claude's content array", () => {
+    expect(
+      parseClaudeCodeStreamJsonLine(
+        '{"type":"assistant","message":{"content":[{"type":"text","text":"CLAUDE_OK"}]}}',
+      ),
+    ).toMatchObject({
+      kind: "assistant-message",
+      textDelta: "CLAUDE_OK",
+    });
+  });
+
+  it("parses nested stream-event text deltas", () => {
+    expect(
+      parseClaudeCodeStreamJsonLine(
+        '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"CLAUDE_OK"}}}',
+      ),
+    ).toMatchObject({
+      kind: "assistant-delta",
+      textDelta: "CLAUDE_OK",
+    });
+  });
+
   it("parses session updates", () => {
     expect(parseClaudeCodeStreamJsonLine('{"session_id":"sess_123"}')).toMatchObject({
       kind: "session",

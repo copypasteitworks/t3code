@@ -102,7 +102,7 @@ describe("buildClaudeCodeTurnInputLine", () => {
         }),
       ),
     ).toEqual({
-      type: "user_message",
+      type: "user",
       message: {
         role: "user",
         content: [

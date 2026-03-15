@@ -28,15 +28,30 @@ function asObject(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
+function asArray(value: unknown): ReadonlyArray<unknown> | undefined {
+  return Array.isArray(value) ? value : undefined;
+}
+
 function extractTextDelta(raw: Record<string, unknown>): string | undefined {
+  const messageContent = asArray(asObject(raw.message)?.content);
+  const firstMessageText = messageContent
+    ?.map((entry) => asObject(entry))
+    .map((entry) => asString(entry?.text))
+    .find((entry) => entry !== undefined);
+  const nestedEvent = asObject(raw.event);
+  const nestedDelta = asObject(nestedEvent?.delta);
+  const nestedContentBlock = asObject(nestedEvent?.content_block);
   return (
     asString(raw.delta) ??
     asString(raw.text) ??
     asString(raw.content) ??
     asString(asObject(raw.message)?.delta) ??
     asString(asObject(raw.message)?.text) ??
+    firstMessageText ??
     asString(asObject(raw.content_block)?.text) ??
-    asString(asObject(raw.contentBlock)?.text)
+    asString(asObject(raw.contentBlock)?.text) ??
+    asString(nestedDelta?.text) ??
+    asString(nestedContentBlock?.text)
   );
 }
 
@@ -67,6 +82,8 @@ export function parseClaudeCodeStreamJsonLine(line: string): ClaudeCodeStreamJso
     const raw = JSON.parse(trimmed) as Record<string, unknown>;
     const type = asString(raw.type)?.toLowerCase();
     const subtype = asString(raw.subtype)?.toLowerCase();
+    const event = asObject(raw.event);
+    const eventType = asString(event?.type)?.toLowerCase();
     const textDelta = extractTextDelta(raw);
     const plan = extractPlan(raw);
 
@@ -82,6 +99,13 @@ export function parseClaudeCodeStreamJsonLine(line: string): ClaudeCodeStreamJso
     }
     if (type === "warning") {
       return { raw, kind: "warning", message: asString(raw.message) ?? "Claude warning" };
+    }
+    if (type === "stream_event" && eventType === "content_block_delta" && textDelta) {
+      return {
+        raw,
+        kind: "assistant-delta",
+        textDelta,
+      };
     }
     if (type === "result" || subtype === "result" || raw.stop_reason !== undefined) {
       return {
@@ -103,7 +127,10 @@ export function parseClaudeCodeStreamJsonLine(line: string): ClaudeCodeStreamJso
     if (textDelta) {
       return {
         raw,
-        kind: type === "message" || type === "assistant" ? "assistant-message" : "assistant-delta",
+        kind:
+          type === "message" || type === "assistant" || eventType === "message_start"
+            ? "assistant-message"
+            : "assistant-delta",
         textDelta,
       };
     }

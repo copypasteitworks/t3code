@@ -1710,6 +1710,132 @@ projectionLayer("OrchestrationProjectionPipeline", (it) => {
       ]);
     }),
   );
+
+  it.effect("reconciles running turn rows when a session is interrupted or stopped", () =>
+    Effect.gen(function* () {
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
+        eventStore
+          .append(event)
+          .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)));
+
+      yield* appendAndProject({
+        type: "project.created",
+        eventId: EventId.makeUnsafe("evt-session-close-1"),
+        aggregateKind: "project",
+        aggregateId: ProjectId.makeUnsafe("project-session-close"),
+        occurredAt: "2026-02-27T09:00:00.000Z",
+        commandId: CommandId.makeUnsafe("cmd-session-close-1"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-session-close-1"),
+        metadata: {},
+        payload: {
+          projectId: ProjectId.makeUnsafe("project-session-close"),
+          title: "Project Session Close",
+          workspaceRoot: "/tmp/project-session-close",
+          defaultModel: null,
+          scripts: [],
+          createdAt: "2026-02-27T09:00:00.000Z",
+          updatedAt: "2026-02-27T09:00:00.000Z",
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.created",
+        eventId: EventId.makeUnsafe("evt-session-close-2"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.makeUnsafe("thread-session-close"),
+        occurredAt: "2026-02-27T09:00:01.000Z",
+        commandId: CommandId.makeUnsafe("cmd-session-close-2"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-session-close-2"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.makeUnsafe("thread-session-close"),
+          projectId: ProjectId.makeUnsafe("project-session-close"),
+          title: "Thread Session Close",
+          model: "claude-sonnet-4-6",
+          runtimeMode: "full-access",
+          branch: null,
+          worktreePath: null,
+          createdAt: "2026-02-27T09:00:01.000Z",
+          updatedAt: "2026-02-27T09:00:01.000Z",
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.session-set",
+        eventId: EventId.makeUnsafe("evt-session-close-3"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.makeUnsafe("thread-session-close"),
+        occurredAt: "2026-02-27T09:00:02.000Z",
+        commandId: CommandId.makeUnsafe("cmd-session-close-3"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-session-close-3"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.makeUnsafe("thread-session-close"),
+          session: {
+            threadId: ThreadId.makeUnsafe("thread-session-close"),
+            status: "running",
+            providerName: "claudeCode",
+            runtimeMode: "full-access",
+            activeTurnId: TurnId.makeUnsafe("turn-running"),
+            lastError: null,
+            updatedAt: "2026-02-27T09:00:02.000Z",
+          },
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.session-set",
+        eventId: EventId.makeUnsafe("evt-session-close-4"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.makeUnsafe("thread-session-close"),
+        occurredAt: "2026-02-27T09:00:03.000Z",
+        commandId: CommandId.makeUnsafe("cmd-session-close-4"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-session-close-4"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.makeUnsafe("thread-session-close"),
+          session: {
+            threadId: ThreadId.makeUnsafe("thread-session-close"),
+            status: "stopped",
+            providerName: "claudeCode",
+            runtimeMode: "full-access",
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: "2026-02-27T09:00:03.000Z",
+          },
+        },
+      });
+
+      const turnRows = yield* sql<{
+        readonly turnId: string;
+        readonly status: string;
+        readonly completedAt: string | null;
+      }>`
+        SELECT
+          turn_id AS "turnId",
+          state AS "status",
+          completed_at AS "completedAt"
+        FROM projection_turns
+        WHERE thread_id = 'thread-session-close'
+          AND turn_id = 'turn-running'
+      `;
+
+      assert.deepEqual(turnRows, [
+        {
+          turnId: "turn-running",
+          status: "interrupted",
+          completedAt: "2026-02-27T09:00:03.000Z",
+        },
+      ]);
+    }),
+  );
 });
 
 it.effect("restores pending turn-start metadata across projection pipeline restart", () =>

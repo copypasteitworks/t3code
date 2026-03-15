@@ -35,6 +35,53 @@ function checkpointStatusToLatestTurnState(status: "ready" | "missing" | "error"
   return "completed" as const;
 }
 
+function reconcileLatestTurnForSession(
+  thread: OrchestrationThread,
+  session: OrchestrationSession,
+): OrchestrationThread["latestTurn"] {
+  if (session.status === "running" && session.activeTurnId !== null) {
+    return {
+      turnId: session.activeTurnId,
+      state: "running",
+      requestedAt:
+        thread.latestTurn?.turnId === session.activeTurnId
+          ? thread.latestTurn.requestedAt
+          : session.updatedAt,
+      startedAt:
+        thread.latestTurn?.turnId === session.activeTurnId
+          ? (thread.latestTurn.startedAt ?? session.updatedAt)
+          : session.updatedAt,
+      completedAt: null,
+      assistantMessageId:
+        thread.latestTurn?.turnId === session.activeTurnId
+          ? thread.latestTurn.assistantMessageId
+          : null,
+    };
+  }
+
+  if (thread.latestTurn?.state !== "running") {
+    return thread.latestTurn;
+  }
+
+  if (session.status === "interrupted" || session.status === "stopped") {
+    return {
+      ...thread.latestTurn,
+      state: "interrupted",
+      completedAt: thread.latestTurn.completedAt ?? session.updatedAt,
+    };
+  }
+
+  if (session.status === "error") {
+    return {
+      ...thread.latestTurn,
+      state: "error",
+      completedAt: thread.latestTurn.completedAt ?? session.updatedAt,
+    };
+  }
+
+  return thread.latestTurn;
+}
+
 function updateThread(
   threads: ReadonlyArray<OrchestrationThread>,
   threadId: ThreadId,
@@ -415,26 +462,7 @@ export function projectEvent(
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             session,
-            latestTurn:
-              session.status === "running" && session.activeTurnId !== null
-                ? {
-                    turnId: session.activeTurnId,
-                    state: "running",
-                    requestedAt:
-                      thread.latestTurn?.turnId === session.activeTurnId
-                        ? thread.latestTurn.requestedAt
-                        : session.updatedAt,
-                    startedAt:
-                      thread.latestTurn?.turnId === session.activeTurnId
-                        ? (thread.latestTurn.startedAt ?? session.updatedAt)
-                        : session.updatedAt,
-                    completedAt: null,
-                    assistantMessageId:
-                      thread.latestTurn?.turnId === session.activeTurnId
-                        ? thread.latestTurn.assistantMessageId
-                        : null,
-                  }
-                : thread.latestTurn,
+            latestTurn: reconcileLatestTurnForSession(thread, session),
             updatedAt: event.occurredAt,
           }),
         };

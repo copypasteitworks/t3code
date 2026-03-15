@@ -77,6 +77,14 @@ interface AttachmentSideEffects {
   readonly prunedThreadRelativePaths: Map<string, Set<string>>;
 }
 
+function terminalTurnStateForSessionStatus(
+  status: "idle" | "starting" | "running" | "ready" | "interrupted" | "stopped" | "error",
+) {
+  if (status === "error") return "error" as const;
+  if (status === "interrupted" || status === "stopped") return "interrupted" as const;
+  return null;
+}
+
 const materializeAttachmentsForProjection = Effect.fn(
   (input: { readonly attachments: ReadonlyArray<ChatAttachment> }) =>
     Effect.succeed(input.attachments.length === 0 ? [] : input.attachments),
@@ -783,6 +791,35 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
         case "thread.session-set": {
           const turnId = event.payload.session.activeTurnId;
           if (turnId === null || event.payload.session.status !== "running") {
+            const terminalState = terminalTurnStateForSessionStatus(event.payload.session.status);
+            if (terminalState !== null) {
+              const turnRows = yield* projectionTurnRepository.listByThreadId({
+                threadId: event.payload.threadId,
+              });
+              yield* Effect.forEach(
+                turnRows,
+                (row) => {
+                  if (row.turnId === null || row.state !== "running") {
+                    return Effect.void;
+                  }
+                  return projectionTurnRepository.upsertByTurnId({
+                    threadId: row.threadId,
+                    turnId: row.turnId,
+                    pendingMessageId: row.pendingMessageId,
+                    assistantMessageId: row.assistantMessageId,
+                    state: terminalState,
+                    checkpointTurnCount: row.checkpointTurnCount,
+                    checkpointRef: row.checkpointRef,
+                    checkpointStatus: row.checkpointStatus,
+                    checkpointFiles: row.checkpointFiles,
+                    completedAt: row.completedAt ?? event.payload.session.updatedAt,
+                    startedAt: row.startedAt ?? event.payload.session.updatedAt,
+                    requestedAt: row.requestedAt ?? event.payload.session.updatedAt,
+                  });
+                },
+                { concurrency: 1 },
+              ).pipe(Effect.asVoid);
+            }
             return;
           }
 

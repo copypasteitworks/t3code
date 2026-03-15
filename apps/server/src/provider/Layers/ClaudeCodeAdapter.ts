@@ -27,6 +27,7 @@ import {
   buildClaudeCodeSettingsFile,
   buildClaudeCodeTurnArgs,
   buildClaudeCodeTurnEnv,
+  buildClaudeCodeTurnInputLine,
 } from "../claudeCode/args.ts";
 import {
   createClaudeCodeApprovalOpenedEvent,
@@ -469,8 +470,7 @@ export const makeClaudeCodeAdapterLive = (options?: ClaudeCodeAdapterLiveOptions
                 );
               }
             });
-            const stdinPayload = JSON.stringify({
-              type: "user",
+            const stdinPayload = buildClaudeCodeTurnInputLine({
               text: input.input ?? "",
             });
             child.stdin.write(`${stdinPayload}\n`);

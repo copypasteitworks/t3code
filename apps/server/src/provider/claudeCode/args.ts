@@ -19,6 +19,10 @@ export interface BuildClaudeCodeTurnArgsInput {
   readonly forkSession?: boolean;
 }
 
+export interface BuildClaudeCodeTurnInputLineInput {
+  readonly text: string;
+}
+
 function quoteForShell(value: string): string {
   if (process.platform === "win32") {
     return `"${value.replace(/"/g, '\\"')}"`;
@@ -115,6 +119,23 @@ export function buildClaudeCodeTurnArgs(
     args.push("--effort", effort);
   }
   return args;
+}
+
+export function buildClaudeCodeTurnInputLine(
+  input: BuildClaudeCodeTurnInputLineInput,
+): string {
+  return JSON.stringify({
+    type: "user_message",
+    message: {
+      role: "user",
+      content: [
+        {
+          type: "text",
+          text: input.text,
+        },
+      ],
+    },
+  });
 }
 
 export function buildClaudeCodeTurnEnv(

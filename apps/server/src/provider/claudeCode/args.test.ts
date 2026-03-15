@@ -4,6 +4,7 @@ import {
   buildClaudeCodeSettingsFile,
   buildClaudeCodeTurnArgs,
   buildClaudeCodeTurnEnv,
+  buildClaudeCodeTurnInputLine,
 } from "./args.ts";
 
 describe("buildClaudeCodeTurnArgs", () => {
@@ -88,6 +89,29 @@ describe("buildClaudeCodeTurnEnv", () => {
       CLAUDE_CODE_MCP_CONFIG_PATH: "/tmp/mcp.json",
       CLAUDE_CODE_STRICT_MCP_CONFIG: "1",
       CLAUDE_CODE_SETTING_SOURCES: "user,local",
+    });
+  });
+});
+
+describe("buildClaudeCodeTurnInputLine", () => {
+  it("encodes stream-json user input in Claude's expected message envelope", () => {
+    expect(
+      JSON.parse(
+        buildClaudeCodeTurnInputLine({
+          text: "Reply with exactly: CLAUDE_OK",
+        }),
+      ),
+    ).toEqual({
+      type: "user_message",
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: "Reply with exactly: CLAUDE_OK",
+          },
+        ],
+      },
     });
   });
 });

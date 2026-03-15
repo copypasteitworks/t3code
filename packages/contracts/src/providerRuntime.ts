@@ -414,8 +414,60 @@ export const UserInputQuestion = Schema.Struct({
 });
 export type UserInputQuestion = typeof UserInputQuestion.Type;
 
-const UserInputRequestedPayload = Schema.Struct({
+const UserInputQuestionnaireRequest = Schema.Struct({
+  kind: Schema.Literal("questionnaire"),
   questions: Schema.Array(UserInputQuestion),
+});
+export type UserInputQuestionnaireRequest = typeof UserInputQuestionnaireRequest.Type;
+
+const UserInputFormFieldOption = Schema.Struct({
+  label: TrimmedNonEmptyStringSchema,
+  value: Schema.Unknown,
+  description: Schema.optional(TrimmedNonEmptyStringSchema),
+});
+export type UserInputFormFieldOption = typeof UserInputFormFieldOption.Type;
+
+const UserInputFormField = Schema.Struct({
+  id: TrimmedNonEmptyStringSchema,
+  label: TrimmedNonEmptyStringSchema,
+  input: Schema.Literals(["text", "textarea", "password", "number", "boolean", "choice", "url"]),
+  description: Schema.optional(TrimmedNonEmptyStringSchema),
+  placeholder: Schema.optional(TrimmedNonEmptyStringSchema),
+  required: Schema.optional(Schema.Boolean),
+  defaultValue: Schema.optional(Schema.Unknown),
+  options: Schema.optional(Schema.Array(UserInputFormFieldOption)),
+});
+export type UserInputFormField = typeof UserInputFormField.Type;
+
+const UserInputFormRequest = Schema.Struct({
+  kind: Schema.Literal("form"),
+  title: Schema.optional(TrimmedNonEmptyStringSchema),
+  description: Schema.optional(TrimmedNonEmptyStringSchema),
+  submitLabel: Schema.optional(TrimmedNonEmptyStringSchema),
+  fields: Schema.Array(UserInputFormField),
+});
+export type UserInputFormRequest = typeof UserInputFormRequest.Type;
+
+const UserInputUrlRequest = Schema.Struct({
+  kind: Schema.Literal("url"),
+  title: Schema.optional(TrimmedNonEmptyStringSchema),
+  description: Schema.optional(TrimmedNonEmptyStringSchema),
+  url: TrimmedNonEmptyStringSchema,
+  openLabel: Schema.optional(TrimmedNonEmptyStringSchema),
+  instructions: Schema.optional(TrimmedNonEmptyStringSchema),
+  completionLabel: Schema.optional(TrimmedNonEmptyStringSchema),
+});
+export type UserInputUrlRequest = typeof UserInputUrlRequest.Type;
+
+export const ProviderUserInputRequest = Schema.Union([
+  UserInputQuestionnaireRequest,
+  UserInputFormRequest,
+  UserInputUrlRequest,
+]);
+export type ProviderUserInputRequest = typeof ProviderUserInputRequest.Type;
+
+const UserInputRequestedPayload = Schema.Struct({
+  request: ProviderUserInputRequest,
 });
 export type UserInputRequestedPayload = typeof UserInputRequestedPayload.Type;
 

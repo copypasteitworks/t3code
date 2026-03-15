@@ -1,0 +1,17 @@
+{
+  "source": "ProviderHealth.checkClaudeCodeProviderStatus",
+  "commands": [
+    {
+      "argv": ["claude", "--version"],
+      "stdout": "claude 1.0.43\n",
+      "stderr": "",
+      "exitCode": 0
+    },
+    {
+      "argv": ["claude", "auth", "status"],
+      "stdout": "{\"authenticated\":true}\n",
+      "stderr": "",
+      "exitCode": 0
+    }
+  ]
+}

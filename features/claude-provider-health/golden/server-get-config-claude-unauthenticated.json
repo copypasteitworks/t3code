@@ -1,0 +1,24 @@
+{
+  "cwd": "/repo/project",
+  "keybindingsConfigPath": "<STATE_DIR>/keybindings.json",
+  "keybindings": [],
+  "issues": [],
+  "providers": [
+    {
+      "provider": "codex",
+      "status": "ready",
+      "available": true,
+      "authStatus": "authenticated",
+      "checkedAt": "2026-03-15T00:00:00.000Z"
+    },
+    {
+      "provider": "claudeCode",
+      "status": "error",
+      "available": false,
+      "authStatus": "unauthenticated",
+      "checkedAt": "2026-03-15T00:00:00.000Z",
+      "message": "Claude Code is not authenticated. Run `claude auth login` and try again."
+    }
+  ],
+  "availableEditors": []
+}

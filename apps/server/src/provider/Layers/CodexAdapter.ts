@@ -551,7 +551,10 @@ function mapToRuntimeEvents(
           ...runtimeEventBase(event, canonicalThreadId),
           type: "user-input.requested",
           payload: {
-            questions,
+            request: {
+              kind: "questionnaire",
+              questions,
+            },
           },
         },
       ];
@@ -1502,6 +1505,7 @@ const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
       provider: PROVIDER,
       capabilities: {
         sessionModelSwitch: "in-session",
+        conversationRollback: "supported",
       },
       startSession,
       sendTurn,

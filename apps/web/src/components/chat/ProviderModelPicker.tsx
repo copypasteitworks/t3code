@@ -20,14 +20,6 @@ import {
 import { ClaudeAI, CursorIcon, Gemini, Icon, OpenAI, OpenCodeIcon } from "../Icons";
 import { cn } from "~/lib/utils";
 
-function isAvailableProviderOption(option: (typeof PROVIDER_OPTIONS)[number]): option is {
-  value: ProviderKind;
-  label: string;
-  available: true;
-} {
-  return option.available && option.value !== "claudeCode";
-}
-
 function resolveModelForProviderPicker(
   provider: ProviderKind,
   value: string,
@@ -67,8 +59,6 @@ const PROVIDER_ICON_BY_PROVIDER: Record<ProviderPickerKind, Icon> = {
   cursor: CursorIcon,
 };
 
-export const AVAILABLE_PROVIDER_OPTIONS = PROVIDER_OPTIONS.filter(isAvailableProviderOption);
-const UNAVAILABLE_PROVIDER_OPTIONS = PROVIDER_OPTIONS.filter((option) => !option.available);
 const COMING_SOON_PROVIDER_OPTIONS = [
   { id: "opencode", label: "OpenCode", icon: OpenCodeIcon },
   { id: "gemini", label: "Gemini", icon: Gemini },
@@ -78,12 +68,21 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   provider: ProviderKind;
   model: ModelSlug;
   lockedProvider: ProviderKind | null;
+  availableProviders: ReadonlyArray<ProviderKind>;
   modelOptionsByProvider: Record<ProviderKind, ReadonlyArray<{ slug: string; name: string }>>;
   compact?: boolean;
   disabled?: boolean;
   onProviderModelChange: (provider: ProviderKind, model: ModelSlug) => void;
 }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const availableProviderOptions = PROVIDER_OPTIONS.filter(
+    (option): option is { value: ProviderKind; label: string; available: boolean } =>
+      option.value !== "cursor" && props.availableProviders.includes(option.value as ProviderKind),
+  );
+  const unavailableProviderOptions = PROVIDER_OPTIONS.filter(
+    (option) =>
+      option.value !== "cursor" && !props.availableProviders.includes(option.value as ProviderKind),
+  );
   const selectedProviderOptions = props.modelOptionsByProvider[props.provider];
   const selectedModelLabel =
     selectedProviderOptions.find((option) => option.slug === props.model)?.name ?? props.model;
@@ -122,7 +121,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
         </span>
       </MenuTrigger>
       <MenuPopup align="start">
-        {AVAILABLE_PROVIDER_OPTIONS.map((option) => {
+        {availableProviderOptions.map((option) => {
           const OptionIcon = PROVIDER_ICON_BY_PROVIDER[option.value];
           const isDisabledByProviderLock =
             props.lockedProvider !== null && props.lockedProvider !== option.value;
@@ -168,8 +167,8 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             </MenuSub>
           );
         })}
-        {UNAVAILABLE_PROVIDER_OPTIONS.length > 0 && <MenuDivider />}
-        {UNAVAILABLE_PROVIDER_OPTIONS.map((option) => {
+        {unavailableProviderOptions.length > 0 && <MenuDivider />}
+        {unavailableProviderOptions.map((option) => {
           const OptionIcon = PROVIDER_ICON_BY_PROVIDER[option.value];
           return (
             <MenuItem key={option.value} disabled>
@@ -182,12 +181,12 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
               />
               <span>{option.label}</span>
               <span className="ms-auto text-[11px] text-muted-foreground/80 uppercase tracking-[0.08em]">
-                Coming soon
+                Beta
               </span>
             </MenuItem>
           );
         })}
-        {UNAVAILABLE_PROVIDER_OPTIONS.length === 0 && <MenuDivider />}
+        {unavailableProviderOptions.length === 0 && <MenuDivider />}
         {COMING_SOON_PROVIDER_OPTIONS.map((option) => {
           const OptionIcon = option.icon;
           return (

@@ -11,34 +11,19 @@ import {
 
 describe("resolvePendingUserInputAnswer", () => {
   it("prefers a custom answer over a selected option", () => {
-    expect(
-      resolvePendingUserInputAnswer({
-        selectedOptionLabel: "Keep current envelope",
-        customAnswer: "Keep the existing envelope for one release",
-      }),
-    ).toBe("Keep the existing envelope for one release");
+    expect(resolvePendingUserInputAnswer("Keep the existing envelope for one release")).toBe(
+      "Keep the existing envelope for one release",
+    );
   });
 
   it("falls back to the selected option", () => {
-    expect(
-      resolvePendingUserInputAnswer({
-        selectedOptionLabel: "Scaffold only",
-      }),
-    ).toBe("Scaffold only");
+    expect(resolvePendingUserInputAnswer("Scaffold only")).toBe("Scaffold only");
   });
 
   it("clears the preset selection when a custom answer is entered", () => {
-    expect(
-      setPendingUserInputCustomAnswer(
-        {
-          selectedOptionLabel: "Preserve existing tags",
-        },
-        "doesn't matter",
-      ),
-    ).toEqual({
-      selectedOptionLabel: undefined,
-      customAnswer: "doesn't matter",
-    });
+    expect(setPendingUserInputCustomAnswer("Preserve existing tags", "doesn't matter")).toBe(
+      "doesn't matter",
+    );
   });
 });
 
@@ -71,12 +56,8 @@ describe("buildPendingUserInputAnswers", () => {
           },
         ],
         {
-          scope: {
-            selectedOptionLabel: "Orchestration-first",
-          },
-          compat: {
-            customAnswer: "Keep the current envelope for one release window",
-          },
+          scope: "Orchestration-first",
+          compat: "Keep the current envelope for one release window",
         },
       ),
     ).toEqual({
@@ -104,6 +85,79 @@ describe("buildPendingUserInputAnswers", () => {
         {},
       ),
     ).toBeNull();
+  });
+
+  it("returns structured answers for completed form requests", () => {
+    expect(
+      buildPendingUserInputAnswers(
+        {
+          kind: "form",
+          fields: [
+            {
+              id: "api_key",
+              label: "API key",
+              input: "password",
+              required: true,
+            },
+            {
+              id: "region",
+              label: "Region",
+              input: "choice",
+              options: [
+                {
+                  label: "EU",
+                  value: "eu",
+                },
+              ],
+            },
+            {
+              id: "notes",
+              label: "Notes",
+              input: "textarea",
+              required: false,
+            },
+          ],
+        },
+        {
+          api_key: "secret",
+          region: "eu",
+        },
+      ),
+    ).toEqual({
+      api_key: "secret",
+      region: "eu",
+    });
+  });
+
+  it("requires required form fields", () => {
+    expect(
+      buildPendingUserInputAnswers(
+        {
+          kind: "form",
+          fields: [
+            {
+              id: "api_key",
+              label: "API key",
+              input: "password",
+              required: true,
+            },
+          ],
+        },
+        {},
+      ),
+    ).toBeNull();
+  });
+
+  it("returns an empty answer object for url prompts", () => {
+    expect(
+      buildPendingUserInputAnswers(
+        {
+          kind: "url",
+          url: "https://example.com/device",
+        },
+        {},
+      ),
+    ).toEqual({});
   });
 });
 
@@ -136,9 +190,7 @@ describe("pending user input question progress", () => {
   it("counts only answered questions", () => {
     expect(
       countAnsweredPendingUserInputQuestions(questions, {
-        scope: {
-          selectedOptionLabel: "Orchestration-first",
-        },
+        scope: "Orchestration-first",
       }),
     ).toBe(1);
   });
@@ -146,9 +198,7 @@ describe("pending user input question progress", () => {
   it("finds the first unanswered question", () => {
     expect(
       findFirstUnansweredPendingUserInputQuestionIndex(questions, {
-        scope: {
-          selectedOptionLabel: "Orchestration-first",
-        },
+        scope: "Orchestration-first",
       }),
     ).toBe(1);
   });
@@ -156,12 +206,8 @@ describe("pending user input question progress", () => {
   it("returns the last question index when all answers are complete", () => {
     expect(
       findFirstUnansweredPendingUserInputQuestionIndex(questions, {
-        scope: {
-          selectedOptionLabel: "Orchestration-first",
-        },
-        compat: {
-          customAnswer: "Keep it for one release window",
-        },
+        scope: "Orchestration-first",
+        compat: "Keep it for one release window",
       }),
     ).toBe(1);
   });
@@ -171,9 +217,7 @@ describe("pending user input question progress", () => {
       derivePendingUserInputProgress(
         questions,
         {
-          scope: {
-            selectedOptionLabel: "Orchestration-first",
-          },
+          scope: "Orchestration-first",
         },
         0,
       ),

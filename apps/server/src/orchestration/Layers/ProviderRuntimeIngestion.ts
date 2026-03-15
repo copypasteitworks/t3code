@@ -308,7 +308,7 @@ function runtimeEventToActivities(
           summary: "User input requested",
           payload: {
             ...(event.requestId ? { requestId: event.requestId } : {}),
-            questions: event.payload.questions,
+            request: event.payload.request,
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,

@@ -3,6 +3,9 @@ import { ProviderKind } from "./orchestration";
 
 export const CODEX_REASONING_EFFORT_OPTIONS = ["xhigh", "high", "medium", "low"] as const;
 export type CodexReasoningEffort = (typeof CODEX_REASONING_EFFORT_OPTIONS)[number];
+export const CLAUDE_CODE_EFFORT_OPTIONS = ["low", "medium", "high", "max"] as const;
+export type ClaudeCodeEffort = (typeof CLAUDE_CODE_EFFORT_OPTIONS)[number];
+export type ProviderEffort = CodexReasoningEffort | ClaudeCodeEffort;
 
 export const CodexModelOptions = Schema.Struct({
   reasoningEffort: Schema.optional(Schema.Literals(CODEX_REASONING_EFFORT_OPTIONS)),
@@ -10,8 +13,14 @@ export const CodexModelOptions = Schema.Struct({
 });
 export type CodexModelOptions = typeof CodexModelOptions.Type;
 
+export const ClaudeCodeModelOptions = Schema.Struct({
+  effort: Schema.optional(Schema.Literals(CLAUDE_CODE_EFFORT_OPTIONS)),
+});
+export type ClaudeCodeModelOptions = typeof ClaudeCodeModelOptions.Type;
+
 export const ProviderModelOptions = Schema.Struct({
   codex: Schema.optional(CodexModelOptions),
+  claudeCode: Schema.optional(ClaudeCodeModelOptions),
 });
 export type ProviderModelOptions = typeof ProviderModelOptions.Type;
 
@@ -28,14 +37,23 @@ export const MODEL_OPTIONS_BY_PROVIDER = {
     { slug: "gpt-5.2-codex", name: "GPT-5.2 Codex" },
     { slug: "gpt-5.2", name: "GPT-5.2" },
   ],
+  claudeCode: [
+    { slug: "claude-opus-4-1", name: "Claude Opus 4.1" },
+    { slug: "claude-opus-4-6", name: "Claude Opus 4.6" },
+    { slug: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" },
+    { slug: "claude-haiku-4-5", name: "Claude Haiku 4.5" },
+  ],
 } as const satisfies Record<ProviderKind, readonly ModelOption[]>;
 export type ModelOptionsByProvider = typeof MODEL_OPTIONS_BY_PROVIDER;
 
-type BuiltInModelSlug = ModelOptionsByProvider[ProviderKind][number]["slug"];
+type BuiltInModelSlug = {
+  [K in ProviderKind]: ModelOptionsByProvider[K][number]["slug"];
+}[ProviderKind];
 export type ModelSlug = BuiltInModelSlug | (string & {});
 
 export const DEFAULT_MODEL_BY_PROVIDER = {
   codex: "gpt-5.4",
+  claudeCode: "claude-sonnet-4-6",
 } as const satisfies Record<ProviderKind, ModelSlug>;
 
 export const MODEL_SLUG_ALIASES_BY_PROVIDER = {
@@ -46,12 +64,22 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER = {
     "5.3-spark": "gpt-5.3-codex-spark",
     "gpt-5.3-spark": "gpt-5.3-codex-spark",
   },
+  claudeCode: {
+    opus: "claude-opus-4-6",
+    sonnet: "claude-sonnet-4-6",
+    haiku: "claude-haiku-4-5",
+    "claude-opus": "claude-opus-4-6",
+    "claude-sonnet": "claude-sonnet-4-6",
+    "claude-haiku": "claude-haiku-4-5",
+  },
 } as const satisfies Record<ProviderKind, Record<string, ModelSlug>>;
 
 export const REASONING_EFFORT_OPTIONS_BY_PROVIDER = {
   codex: CODEX_REASONING_EFFORT_OPTIONS,
-} as const satisfies Record<ProviderKind, readonly CodexReasoningEffort[]>;
+  claudeCode: CLAUDE_CODE_EFFORT_OPTIONS,
+} as const satisfies Record<ProviderKind, readonly ProviderEffort[]>;
 
 export const DEFAULT_REASONING_EFFORT_BY_PROVIDER = {
   codex: "high",
-} as const satisfies Record<ProviderKind, CodexReasoningEffort | null>;
+  claudeCode: "medium",
+} as const satisfies Record<ProviderKind, ProviderEffort | null>;

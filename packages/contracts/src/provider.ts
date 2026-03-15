@@ -38,6 +38,7 @@ export const ProviderSession = Schema.Struct({
   runtimeMode: RuntimeMode,
   cwd: Schema.optional(TrimmedNonEmptyStringSchema),
   model: Schema.optional(TrimmedNonEmptyStringSchema),
+  runtimePayload: Schema.optional(Schema.Unknown),
   threadId: ThreadId,
   resumeCursor: Schema.optional(Schema.Unknown),
   activeTurnId: Schema.optional(TurnId),
@@ -52,8 +53,19 @@ const CodexProviderStartOptions = Schema.Struct({
   homePath: Schema.optional(TrimmedNonEmptyStringSchema),
 });
 
+const ClaudeCodeProviderStartOptions = Schema.Struct({
+  binaryPath: Schema.optional(TrimmedNonEmptyStringSchema),
+  configDir: Schema.optional(TrimmedNonEmptyStringSchema),
+  settingSources: Schema.optional(
+    Schema.Array(Schema.Literals(["user", "project", "local"])).pipe(Schema.mutable),
+  ),
+  mcpConfigPath: Schema.optional(TrimmedNonEmptyStringSchema),
+  strictMcpConfig: Schema.optional(Schema.Boolean),
+});
+
 export const ProviderStartOptions = Schema.Struct({
   codex: Schema.optional(CodexProviderStartOptions),
+  claudeCode: Schema.optional(ClaudeCodeProviderStartOptions),
 });
 export type ProviderStartOptions = typeof ProviderStartOptions.Type;
 

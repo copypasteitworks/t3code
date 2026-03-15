@@ -3,13 +3,19 @@ import { describe, it, assert } from "@effect/vitest";
 import { Effect, FileSystem, Layer, Path, Sink, Stream } from "effect";
 import * as PlatformError from "effect/PlatformError";
 import { ChildProcessSpawner } from "effect/unstable/process";
+import { afterEach, vi } from "vitest";
 
 import {
+  checkClaudeCodeProviderStatus,
   checkCodexProviderStatus,
+  parseClaudeAuthStatusFromOutput,
   hasCustomModelProvider,
   parseAuthStatusFromOutput,
   readCodexConfigModelProvider,
 } from "./ProviderHealth";
+import authenticatedProbeInput from "../../../../../features/claude-provider-health/fixtures/inputs/health-probe-authenticated.json";
+import authenticatedStatusAntiFixture from "../../../../../features/claude-provider-health/fixtures/anti-fixtures/provider-status-authenticated-wrong-availability.json";
+import authenticatedStatusGolden from "../../../../../features/claude-provider-health/golden/provider-status-authenticated.json";
 
 // ── Test helpers ────────────────────────────────────────────────────
 
@@ -57,6 +63,10 @@ function failingSpawnerLayer(description: string) {
     ),
   );
 }
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 /**
  * Create a temporary CODEX_HOME scoped to the current Effect test.
@@ -335,6 +345,133 @@ it.layer(NodeServices.layer)("ProviderHealth", (it) => {
         stdout: '[{"ok":true}]\n',
         stderr: "",
         code: 0,
+      });
+      assert.strictEqual(parsed.status, "warning");
+      assert.strictEqual(parsed.authStatus, "unknown");
+    });
+  });
+
+  // ── Claude Code health checks ─────────────────────────────────────
+
+  describe("checkClaudeCodeProviderStatus", () => {
+    it.effect("matches the captured authenticated golden fixture", () =>
+      Effect.gen(function* () {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date(authenticatedStatusGolden.checkedAt));
+        const status = yield* checkClaudeCodeProviderStatus;
+        assert.deepStrictEqual(status, authenticatedStatusGolden);
+        assert.strictEqual(
+          JSON.stringify(status) === JSON.stringify(authenticatedStatusAntiFixture),
+          false,
+        );
+      }).pipe(
+        Effect.provide(
+          mockSpawnerLayer((args) => {
+            const joined = args.join(" ");
+            const versionCommand = authenticatedProbeInput.commands[0];
+            const authCommand = authenticatedProbeInput.commands[1];
+
+            if (joined === versionCommand?.argv.slice(1).join(" ")) {
+              return {
+                stdout: versionCommand.stdout,
+                stderr: versionCommand.stderr,
+                code: versionCommand.exitCode,
+              };
+            }
+            if (joined === authCommand?.argv.slice(1).join(" ")) {
+              return {
+                stdout: authCommand.stdout,
+                stderr: authCommand.stderr,
+                code: authCommand.exitCode,
+              };
+            }
+            throw new Error(`Unexpected args: ${joined}`);
+          }),
+        ),
+      ),
+    );
+
+    it.effect("returns ready when claude is installed and authenticated", () =>
+      Effect.gen(function* () {
+        const status = yield* checkClaudeCodeProviderStatus;
+        assert.strictEqual(status.provider, "claudeCode");
+        assert.strictEqual(status.status, "ready");
+        assert.strictEqual(status.available, true);
+        assert.strictEqual(status.authStatus, "authenticated");
+      }).pipe(
+        Effect.provide(
+          mockSpawnerLayer((args) => {
+            const joined = args.join(" ");
+            if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
+            if (joined === "auth status") return { stdout: "Authenticated\n", stderr: "", code: 0 };
+            throw new Error(`Unexpected args: ${joined}`);
+          }),
+        ),
+      ),
+    );
+
+    it.effect("returns unavailable when claude is missing", () =>
+      Effect.gen(function* () {
+        const status = yield* checkClaudeCodeProviderStatus;
+        assert.strictEqual(status.provider, "claudeCode");
+        assert.strictEqual(status.status, "error");
+        assert.strictEqual(status.available, false);
+        assert.strictEqual(status.authStatus, "unknown");
+        assert.strictEqual(
+          status.message,
+          "Claude Code CLI (`claude`) is not installed or not on PATH.",
+        );
+      }).pipe(Effect.provide(failingSpawnerLayer("spawn claude ENOENT"))),
+    );
+
+    it.effect("returns unauthenticated when claude auth reports login required", () =>
+      Effect.gen(function* () {
+        const status = yield* checkClaudeCodeProviderStatus;
+        assert.strictEqual(status.provider, "claudeCode");
+        assert.strictEqual(status.status, "error");
+        assert.strictEqual(status.available, false);
+        assert.strictEqual(status.authStatus, "unauthenticated");
+        assert.strictEqual(
+          status.message,
+          "Claude Code is not authenticated. Run `claude auth login` and try again.",
+        );
+      }).pipe(
+        Effect.provide(
+          mockSpawnerLayer((args) => {
+            const joined = args.join(" ");
+            if (joined === "--version") return { stdout: "1.0.0\n", stderr: "", code: 0 };
+            if (joined === "auth status") {
+              return { stdout: "", stderr: "Not logged in. Run claude auth login.", code: 1 };
+            }
+            throw new Error(`Unexpected args: ${joined}`);
+          }),
+        ),
+      ),
+    );
+  });
+
+  describe("parseClaudeAuthStatusFromOutput", () => {
+    it("exit code 0 with no auth markers is ready", () => {
+      const parsed = parseClaudeAuthStatusFromOutput({ stdout: "OK\n", stderr: "", code: 0 });
+      assert.strictEqual(parsed.status, "ready");
+      assert.strictEqual(parsed.authStatus, "authenticated");
+    });
+
+    it("JSON with authenticated=false is unauthenticated", () => {
+      const parsed = parseClaudeAuthStatusFromOutput({
+        stdout: '[{"authenticated":false}]\n',
+        stderr: "",
+        code: 0,
+      });
+      assert.strictEqual(parsed.status, "error");
+      assert.strictEqual(parsed.authStatus, "unauthenticated");
+    });
+
+    it("non-zero output without auth marker is warning", () => {
+      const parsed = parseClaudeAuthStatusFromOutput({
+        stdout: "",
+        stderr: "Unexpected output",
+        code: 1,
       });
       assert.strictEqual(parsed.status, "warning");
       assert.strictEqual(parsed.authStatus, "unknown");

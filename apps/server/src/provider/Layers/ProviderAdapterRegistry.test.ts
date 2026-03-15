@@ -4,6 +4,7 @@ import { assertFailure } from "@effect/vitest/utils";
 
 import { Effect, Layer, Stream } from "effect";
 
+import { ClaudeCodeAdapter, type ClaudeCodeAdapterShape } from "../Services/ClaudeCodeAdapter.ts";
 import { CodexAdapter, CodexAdapterShape } from "../Services/CodexAdapter.ts";
 import { ProviderAdapterRegistry } from "../Services/ProviderAdapterRegistry.ts";
 import { ProviderAdapterRegistryLive } from "./ProviderAdapterRegistry.ts";
@@ -12,7 +13,24 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 
 const fakeCodexAdapter: CodexAdapterShape = {
   provider: "codex",
-  capabilities: { sessionModelSwitch: "in-session" },
+  capabilities: { sessionModelSwitch: "in-session", conversationRollback: "supported" },
+  startSession: vi.fn(),
+  sendTurn: vi.fn(),
+  interruptTurn: vi.fn(),
+  respondToRequest: vi.fn(),
+  respondToUserInput: vi.fn(),
+  stopSession: vi.fn(),
+  listSessions: vi.fn(),
+  hasSession: vi.fn(),
+  readThread: vi.fn(),
+  rollbackThread: vi.fn(),
+  stopAll: vi.fn(),
+  streamEvents: Stream.empty,
+};
+
+const fakeClaudeCodeAdapter: ClaudeCodeAdapterShape = {
+  provider: "claudeCode",
+  capabilities: { sessionModelSwitch: "in-session", conversationRollback: "unsupported" },
   startSession: vi.fn(),
   sendTurn: vi.fn(),
   interruptTurn: vi.fn(),
@@ -29,7 +47,13 @@ const fakeCodexAdapter: CodexAdapterShape = {
 
 const layer = it.layer(
   Layer.mergeAll(
-    Layer.provide(ProviderAdapterRegistryLive, Layer.succeed(CodexAdapter, fakeCodexAdapter)),
+    Layer.provide(
+      ProviderAdapterRegistryLive,
+      Layer.mergeAll(
+        Layer.succeed(CodexAdapter, fakeCodexAdapter),
+        Layer.succeed(ClaudeCodeAdapter, fakeClaudeCodeAdapter),
+      ),
+    ),
     NodeServices.layer,
   ),
 );
@@ -42,7 +66,7 @@ layer("ProviderAdapterRegistryLive", (it) => {
       assert.equal(codex, fakeCodexAdapter);
 
       const providers = yield* registry.listProviders();
-      assert.deepEqual(providers, ["codex"]);
+      assert.deepEqual(providers, ["codex", "claudeCode"]);
     }),
   );
 

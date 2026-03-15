@@ -36,6 +36,7 @@
     "typecheck": "turbo run typecheck",
     "lint": "oxlint --report-unused-disable-directives",
     "test": "turbo run test",
+    "test:feature:claude-provider-health": "bun run build && bun lint && bun typecheck && (cd apps/server && bun x vitest run src/provider/Layers/ProviderHealth.test.ts) && (cd packages/contracts && bun x vitest run src/server.test.ts) && (cd apps/web && bun x vitest run src/components/chat/ProviderHealthBanner.test.tsx) && (cd apps/server && bun x vitest run src/wsServer.test.ts) && (cd apps/web && bun x vitest run --config vitest.browser.config.ts src/components/ChatView.browser.tsx)",
     "test:desktop-smoke": "turbo run smoke-test --filter=@t3tools/desktop",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",

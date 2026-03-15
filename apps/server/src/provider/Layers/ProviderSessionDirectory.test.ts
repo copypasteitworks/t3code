@@ -204,4 +204,38 @@ it.layer(makeDirectoryLayer(SqlitePersistenceMemory))("ProviderSessionDirectoryL
 
       fs.rmSync(tempDir, { recursive: true, force: true });
     }));
+
+  it("normalizes stale claude provider rows to claudeCode", () =>
+    Effect.gen(function* () {
+      const directory = yield* ProviderSessionDirectory;
+      const runtimeRepository = yield* ProviderSessionRuntimeRepository;
+      const threadId = ThreadId.makeUnsafe("thread-claude-legacy");
+
+      yield* runtimeRepository.upsert({
+        threadId,
+        providerName: "claude",
+        adapterKey: "claude",
+        runtimeMode: "approval-required",
+        status: "running",
+        lastSeenAt: new Date().toISOString(),
+        resumeCursor: {
+          sessionId: "sess_legacy",
+        },
+        runtimePayload: {
+          sessionId: "sess_legacy",
+        },
+      });
+
+      const provider = yield* directory.getProvider(threadId);
+      assert.equal(provider, "claudeCode");
+
+      const binding = yield* directory.getBinding(threadId);
+      assert.equal(Option.isSome(binding), true);
+      if (Option.isSome(binding)) {
+        assert.equal(binding.value.provider, "claudeCode");
+        assert.deepEqual(binding.value.resumeCursor, {
+          sessionId: "sess_legacy",
+        });
+      }
+    }));
 });

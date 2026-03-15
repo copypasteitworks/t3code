@@ -3,7 +3,7 @@ import {
   ProjectId,
   REASONING_EFFORT_OPTIONS_BY_PROVIDER,
   ThreadId,
-  type CodexReasoningEffort,
+  type ProviderEffort,
   type ProviderKind,
   type ProviderInteractionMode,
   type RuntimeMode,
@@ -78,7 +78,7 @@ interface PersistedComposerThreadDraftState {
   model?: string | null;
   runtimeMode?: RuntimeMode | null;
   interactionMode?: ProviderInteractionMode | null;
-  effort?: CodexReasoningEffort | null;
+  effort?: ProviderEffort | null;
   codexFastMode?: boolean | null;
   serviceTier?: string | null;
 }
@@ -108,7 +108,7 @@ interface ComposerThreadDraftState {
   model: string | null;
   runtimeMode: RuntimeMode | null;
   interactionMode: ProviderInteractionMode | null;
-  effort: CodexReasoningEffort | null;
+  effort: ProviderEffort | null;
   codexFastMode: boolean;
 }
 
@@ -167,7 +167,7 @@ interface ComposerDraftStoreState {
     threadId: ThreadId,
     interactionMode: ProviderInteractionMode | null | undefined,
   ) => void;
-  setEffort: (threadId: ThreadId, effort: CodexReasoningEffort | null | undefined) => void;
+  setEffort: (threadId: ThreadId, effort: ProviderEffort | null | undefined) => void;
   setCodexFastMode: (threadId: ThreadId, enabled: boolean | null | undefined) => void;
   addImage: (threadId: ThreadId, image: ComposerImageAttachment) => void;
   addImages: (threadId: ThreadId, images: ComposerImageAttachment[]) => void;
@@ -206,8 +206,8 @@ const EMPTY_THREAD_DRAFT = Object.freeze({
   codexFastMode: false,
 }) as ComposerThreadDraftState;
 
-const REASONING_EFFORT_VALUES = new Set<CodexReasoningEffort>(
-  REASONING_EFFORT_OPTIONS_BY_PROVIDER.codex,
+const REASONING_EFFORT_VALUES = new Set<ProviderEffort>(
+  Object.values(REASONING_EFFORT_OPTIONS_BY_PROVIDER).flat(),
 );
 
 function createEmptyThreadDraft(): ComposerThreadDraftState {
@@ -246,7 +246,7 @@ function shouldRemoveDraft(draft: ComposerThreadDraftState): boolean {
 }
 
 function normalizeProviderKind(value: unknown): ProviderKind | null {
-  return value === "codex" ? value : null;
+  return value === "codex" || value === "claudeCode" ? value : null;
 }
 
 function revokeObjectPreviewUrl(previewUrl: string): void {
@@ -421,8 +421,8 @@ function normalizePersistedComposerDraftState(value: unknown): PersistedComposer
     const effortCandidate =
       typeof draftCandidate.effort === "string" ? draftCandidate.effort : null;
     const effort =
-      effortCandidate && REASONING_EFFORT_VALUES.has(effortCandidate as CodexReasoningEffort)
-        ? (effortCandidate as CodexReasoningEffort)
+      effortCandidate && REASONING_EFFORT_VALUES.has(effortCandidate as ProviderEffort)
+        ? (effortCandidate as ProviderEffort)
         : null;
     const codexFastMode =
       draftCandidate.codexFastMode === true ||

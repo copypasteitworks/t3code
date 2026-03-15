@@ -5,6 +5,7 @@ import {
   type OrchestrationThreadActivity,
   type OrchestrationProposedPlanId,
   type ProviderKind,
+  type ProviderUserInputRequest,
   type ToolLifecycleItemType,
   type UserInputQuestion,
   type TurnId,
@@ -18,7 +19,7 @@ import type {
   TurnDiffSummary,
 } from "./types";
 
-export type ProviderPickerKind = ProviderKind | "claudeCode" | "cursor";
+export type ProviderPickerKind = ProviderKind | "cursor";
 
 export const PROVIDER_OPTIONS: Array<{
   value: ProviderPickerKind;
@@ -26,7 +27,7 @@ export const PROVIDER_OPTIONS: Array<{
   available: boolean;
 }> = [
   { value: "codex", label: "Codex", available: true },
-  { value: "claudeCode", label: "Claude Code", available: false },
+  { value: "claudeCode", label: "Claude Code", available: true },
   { value: "cursor", label: "Cursor", available: false },
 ];
 
@@ -53,7 +54,7 @@ export interface PendingApproval {
 export interface PendingUserInput {
   requestId: ApprovalRequestId;
   createdAt: string;
-  questions: ReadonlyArray<UserInputQuestion>;
+  request: ProviderUserInputRequest;
 }
 
 export interface ActivePlanState {
@@ -261,6 +262,116 @@ function parseUserInputQuestions(
   return parsed.length > 0 ? parsed : null;
 }
 
+function parseProviderUserInputRequest(
+  payload: Record<string, unknown> | null,
+): ProviderUserInputRequest | null {
+  const rawRequest =
+    payload?.request && typeof payload.request === "object"
+      ? (payload.request as Record<string, unknown>)
+      : (payload ?? {});
+  const kind = rawRequest?.kind;
+
+  if (kind === "questionnaire" || (!kind && rawRequest?.questions !== undefined)) {
+    const questions = parseUserInputQuestions(rawRequest);
+    if (!questions) {
+      return null;
+    }
+    return {
+      kind: "questionnaire",
+      questions,
+    };
+  }
+
+  if (kind === "form") {
+    const fields = Array.isArray(rawRequest.fields)
+      ? rawRequest.fields
+          .map((entry) => {
+            if (!entry || typeof entry !== "object") return null;
+            const field = entry as Record<string, unknown>;
+            if (
+              typeof field.id !== "string" ||
+              typeof field.label !== "string" ||
+              !["text", "textarea", "password", "number", "boolean", "choice", "url"].includes(
+                String(field.input),
+              )
+            ) {
+              return null;
+            }
+            const options = Array.isArray(field.options)
+              ? field.options
+                  .map((option) => {
+                    if (!option || typeof option !== "object") return null;
+                    const record = option as Record<string, unknown>;
+                    if (typeof record.label !== "string" || !("value" in record)) {
+                      return null;
+                    }
+                    return {
+                      label: record.label,
+                      value: record.value,
+                      ...(typeof record.description === "string"
+                        ? { description: record.description }
+                        : {}),
+                    };
+                  })
+                  .filter((option): option is NonNullable<typeof option> => option !== null)
+              : undefined;
+            return {
+              id: field.id,
+              label: field.label,
+              input: field.input as
+                | "text"
+                | "textarea"
+                | "password"
+                | "number"
+                | "boolean"
+                | "choice"
+                | "url",
+              ...(typeof field.description === "string" ? { description: field.description } : {}),
+              ...(typeof field.placeholder === "string" ? { placeholder: field.placeholder } : {}),
+              ...(typeof field.required === "boolean" ? { required: field.required } : {}),
+              ...("defaultValue" in field ? { defaultValue: field.defaultValue } : {}),
+              ...(options && options.length > 0 ? { options } : {}),
+            };
+          })
+          .filter((field): field is NonNullable<typeof field> => field !== null)
+      : [];
+    if (fields.length === 0) {
+      return null;
+    }
+    return {
+      kind: "form",
+      fields,
+      ...(typeof rawRequest.title === "string" ? { title: rawRequest.title } : {}),
+      ...(typeof rawRequest.description === "string"
+        ? { description: rawRequest.description }
+        : {}),
+      ...(typeof rawRequest.submitLabel === "string"
+        ? { submitLabel: rawRequest.submitLabel }
+        : {}),
+    };
+  }
+
+  if (kind === "url" && typeof rawRequest.url === "string") {
+    return {
+      kind: "url",
+      url: rawRequest.url,
+      ...(typeof rawRequest.title === "string" ? { title: rawRequest.title } : {}),
+      ...(typeof rawRequest.description === "string"
+        ? { description: rawRequest.description }
+        : {}),
+      ...(typeof rawRequest.openLabel === "string" ? { openLabel: rawRequest.openLabel } : {}),
+      ...(typeof rawRequest.instructions === "string"
+        ? { instructions: rawRequest.instructions }
+        : {}),
+      ...(typeof rawRequest.completionLabel === "string"
+        ? { completionLabel: rawRequest.completionLabel }
+        : {}),
+    };
+  }
+
+  return null;
+}
+
 export function derivePendingUserInputs(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
 ): PendingUserInput[] {
@@ -278,14 +389,14 @@ export function derivePendingUserInputs(
         : null;
 
     if (activity.kind === "user-input.requested" && requestId) {
-      const questions = parseUserInputQuestions(payload);
-      if (!questions) {
+      const request = parseProviderUserInputRequest(payload);
+      if (!request) {
         continue;
       }
       openByRequestId.set(requestId, {
         requestId,
         createdAt: activity.createdAt,
-        questions,
+        request,
       });
       continue;
     }

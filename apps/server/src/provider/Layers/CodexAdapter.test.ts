@@ -647,7 +647,10 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
         assert.equal(events[0]?.type, "user-input.requested");
         if (events[0]?.type === "user-input.requested") {
           assert.equal(events[0].requestId, "req-user-input-1");
-          assert.equal(events[0].payload.questions[0]?.id, "sandbox_mode");
+          assert.equal(events[0].payload.request.kind, "questionnaire");
+          if (events[0].payload.request.kind === "questionnaire") {
+            assert.equal(events[0].payload.request.questions[0]?.id, "sandbox_mode");
+          }
         }
 
         assert.equal(events[1]?.type, "user-input.resolved");

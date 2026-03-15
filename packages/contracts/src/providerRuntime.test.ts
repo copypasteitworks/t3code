@@ -62,23 +62,26 @@ describe("ProviderRuntimeEvent", () => {
       threadId: "thread-2",
       requestId: "request-1",
       payload: {
-        questions: [
-          {
-            id: "sandbox_mode",
-            header: "Sandbox",
-            question: "Which mode should be used?",
-            options: [
-              {
-                label: "workspace-write",
-                description: "Allow edits in workspace only",
-              },
-              {
-                label: "danger-full-access",
-                description: "Allow unrestricted access",
-              },
-            ],
-          },
-        ],
+        request: {
+          kind: "questionnaire",
+          questions: [
+            {
+              id: "sandbox_mode",
+              header: "Sandbox",
+              question: "Which mode should be used?",
+              options: [
+                {
+                  label: "workspace-write",
+                  description: "Allow edits in workspace only",
+                },
+                {
+                  label: "danger-full-access",
+                  description: "Allow unrestricted access",
+                },
+              ],
+            },
+          ],
+        },
       },
     });
 
@@ -86,8 +89,12 @@ describe("ProviderRuntimeEvent", () => {
     if (parsed.type !== "user-input.requested") {
       throw new Error("expected user-input.requested");
     }
-    expect(parsed.payload.questions[0]?.id).toBe("sandbox_mode");
-    expect(parsed.payload.questions[0]?.options).toHaveLength(2);
+    expect(parsed.payload.request.kind).toBe("questionnaire");
+    if (parsed.payload.request.kind !== "questionnaire") {
+      throw new Error("expected questionnaire request");
+    }
+    expect(parsed.payload.request.questions[0]?.id).toBe("sandbox_mode");
+    expect(parsed.payload.request.questions[0]?.options).toHaveLength(2);
   });
 
   it("decodes user-input.resolved with answer map", () => {

@@ -54,6 +54,13 @@ const MODEL_PROVIDER_SETTINGS: Array<{
     placeholder: "your-codex-model-slug",
     example: "gpt-6.7-codex-ultra-preview",
   },
+  {
+    provider: "claudeCode",
+    title: "Claude Code",
+    description: "Save additional Claude model slugs for the picker and `/model` command.",
+    placeholder: "your-claude-model-slug",
+    example: "claude-opus-4-7-preview",
+  },
 ] as const;
 
 const TIMESTAMP_FORMAT_LABELS = {
@@ -62,11 +69,31 @@ const TIMESTAMP_FORMAT_LABELS = {
   "24-hour": "24-hour",
 } as const;
 
+const CLAUDE_SETTING_SOURCE_OPTIONS = [
+  {
+    value: "user",
+    label: "User",
+    description: "Load your global Claude settings.",
+  },
+  {
+    value: "project",
+    label: "Project",
+    description: "Load repository-level Claude settings when present.",
+  },
+  {
+    value: "local",
+    label: "Local",
+    description: "Load local machine overrides for Claude.",
+  },
+] as const;
+
 function getCustomModelsForProvider(
   settings: ReturnType<typeof useAppSettings>["settings"],
   provider: ProviderKind,
 ) {
   switch (provider) {
+    case "claudeCode":
+      return settings.customClaudeCodeModels;
     case "codex":
     default:
       return settings.customCodexModels;
@@ -78,6 +105,8 @@ function getDefaultCustomModelsForProvider(
   provider: ProviderKind,
 ) {
   switch (provider) {
+    case "claudeCode":
+      return defaults.customClaudeCodeModels;
     case "codex":
     default:
       return defaults.customCodexModels;
@@ -86,6 +115,8 @@ function getDefaultCustomModelsForProvider(
 
 function patchCustomModels(provider: ProviderKind, models: string[]) {
   switch (provider) {
+    case "claudeCode":
+      return { customClaudeCodeModels: models };
     case "codex":
     default:
       return { customCodexModels: models };
@@ -102,6 +133,7 @@ function SettingsRouteView() {
     Record<ProviderKind, string>
   >({
     codex: "",
+    claudeCode: "",
   });
   const [customModelErrorByProvider, setCustomModelErrorByProvider] = useState<
     Partial<Record<ProviderKind, string | null>>
@@ -109,6 +141,11 @@ function SettingsRouteView() {
 
   const codexBinaryPath = settings.codexBinaryPath;
   const codexHomePath = settings.codexHomePath;
+  const claudeCodeBinaryPath = settings.claudeCodeBinaryPath;
+  const claudeCodeConfigDir = settings.claudeCodeConfigDir;
+  const claudeCodeMcpConfigPath = settings.claudeCodeMcpConfigPath;
+  const claudeCodeStrictMcpConfig = settings.claudeCodeStrictMcpConfig;
+  const claudeCodeSettingSources = settings.claudeCodeSettingSources;
   const keybindingsConfigPath = serverConfigQuery.data?.keybindingsConfigPath ?? null;
   const availableEditors = serverConfigQuery.data?.availableEditors;
 
@@ -364,6 +401,165 @@ function SettingsRouteView() {
                     }
                   >
                     Reset codex overrides
+                  </Button>
+                </div>
+              </div>
+            </section>
+
+            <section className="rounded-2xl border border-border bg-card p-5">
+              <div className="mb-4">
+                <h2 className="text-sm font-medium text-foreground">Claude Code</h2>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  These overrides apply to new Claude Code turns and stay scoped to T3-managed
+                  subprocess launches.
+                </p>
+              </div>
+
+              <div className="space-y-4">
+                <label htmlFor="claude-code-binary-path" className="block space-y-1">
+                  <span className="text-xs font-medium text-foreground">Claude binary path</span>
+                  <Input
+                    id="claude-code-binary-path"
+                    value={claudeCodeBinaryPath}
+                    onChange={(event) =>
+                      updateSettings({ claudeCodeBinaryPath: event.target.value })
+                    }
+                    placeholder="claude"
+                    spellCheck={false}
+                  />
+                  <span className="text-xs text-muted-foreground">
+                    Leave blank to use <code>claude</code> from your PATH.
+                  </span>
+                </label>
+
+                <label htmlFor="claude-code-config-dir" className="block space-y-1">
+                  <span className="text-xs font-medium text-foreground">Config directory</span>
+                  <Input
+                    id="claude-code-config-dir"
+                    value={claudeCodeConfigDir}
+                    onChange={(event) =>
+                      updateSettings({ claudeCodeConfigDir: event.target.value })
+                    }
+                    placeholder="/Users/you/.claude"
+                    spellCheck={false}
+                  />
+                  <span className="text-xs text-muted-foreground">
+                    Optional Claude config directory override for new turns.
+                  </span>
+                </label>
+
+                <label htmlFor="claude-code-mcp-config-path" className="block space-y-1">
+                  <span className="text-xs font-medium text-foreground">MCP config path</span>
+                  <Input
+                    id="claude-code-mcp-config-path"
+                    value={claudeCodeMcpConfigPath}
+                    onChange={(event) =>
+                      updateSettings({ claudeCodeMcpConfigPath: event.target.value })
+                    }
+                    placeholder="/Users/you/.claude/mcp.json"
+                    spellCheck={false}
+                  />
+                  <span className="text-xs text-muted-foreground">
+                    Optional MCP config file passed to Claude when set.
+                  </span>
+                </label>
+
+                <div className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">Strict MCP config</p>
+                    <p className="text-xs text-muted-foreground">
+                      Fail startup when the configured MCP file is invalid or missing.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={claudeCodeStrictMcpConfig}
+                    onCheckedChange={(checked) =>
+                      updateSettings({
+                        claudeCodeStrictMcpConfig: Boolean(checked),
+                      })
+                    }
+                    aria-label="Strict Claude MCP config"
+                  />
+                </div>
+
+                <div className="space-y-2 rounded-lg border border-border bg-background px-3 py-3">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">Setting sources</p>
+                    <p className="text-xs text-muted-foreground">
+                      Choose which Claude setting layers T3 should allow for new turns.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    {CLAUDE_SETTING_SOURCE_OPTIONS.map((option) => {
+                      const checked = claudeCodeSettingSources.includes(option.value);
+                      return (
+                        <label
+                          key={option.value}
+                          className="flex items-start gap-3 rounded-lg border border-border px-3 py-2"
+                        >
+                          <input
+                            type="checkbox"
+                            className="mt-0.5"
+                            checked={checked}
+                            onChange={(event) => {
+                              const enabled = event.target.checked;
+                              const nextSources = enabled
+                                ? [...claudeCodeSettingSources, option.value]
+                                : claudeCodeSettingSources.filter(
+                                    (value) => value !== option.value,
+                                  );
+                              updateSettings({
+                                claudeCodeSettingSources: nextSources,
+                              });
+                            }}
+                          />
+                          <span className="flex flex-col">
+                            <span className="text-sm font-medium text-foreground">
+                              {option.label}
+                            </span>
+                            <span className="text-xs text-muted-foreground">
+                              {option.description}
+                            </span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-3 text-xs text-muted-foreground sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <div>
+                      <p>Binary source</p>
+                      <p className="mt-1 break-all font-mono text-[11px] text-foreground">
+                        {claudeCodeBinaryPath || "PATH"}
+                      </p>
+                    </div>
+                    <div>
+                      <p>Enabled setting sources</p>
+                      <p className="mt-1 font-mono text-[11px] text-foreground">
+                        {claudeCodeSettingSources.length > 0
+                          ? claudeCodeSettingSources.join(", ")
+                          : "none"}
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    className="self-start"
+                    onClick={() =>
+                      updateSettings({
+                        claudeCodeBinaryPath: defaults.claudeCodeBinaryPath,
+                        claudeCodeConfigDir: defaults.claudeCodeConfigDir,
+                        claudeCodeMcpConfigPath: defaults.claudeCodeMcpConfigPath,
+                        claudeCodeStrictMcpConfig: defaults.claudeCodeStrictMcpConfig,
+                        claudeCodeSettingSources: [...defaults.claudeCodeSettingSources],
+                      })
+                    }
+                  >
+                    Reset Claude overrides
                   </Button>
                 </div>
               </div>

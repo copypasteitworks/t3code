@@ -204,19 +204,118 @@ describe("derivePendingUserInputs", () => {
       {
         requestId: "req-user-input-1",
         createdAt: "2026-02-23T00:00:01.000Z",
-        questions: [
-          {
-            id: "sandbox_mode",
-            header: "Sandbox",
-            question: "Which mode should be used?",
-            options: [
+        request: {
+          kind: "questionnaire",
+          questions: [
+            {
+              id: "sandbox_mode",
+              header: "Sandbox",
+              question: "Which mode should be used?",
+              options: [
+                {
+                  label: "workspace-write",
+                  description: "Allow workspace writes only",
+                },
+              ],
+            },
+          ],
+        },
+      },
+    ]);
+  });
+
+  it("parses form and url requests from provider-neutral payloads", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "user-input-form",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "user-input.requested",
+        summary: "User input requested",
+        tone: "info",
+        payload: {
+          requestId: "req-form",
+          request: {
+            kind: "form",
+            title: "MCP auth",
+            submitLabel: "Continue",
+            fields: [
               {
-                label: "workspace-write",
-                description: "Allow workspace writes only",
+                id: "api_key",
+                label: "API key",
+                input: "password",
+                required: true,
+              },
+              {
+                id: "region",
+                label: "Region",
+                input: "choice",
+                options: [
+                  {
+                    label: "EU",
+                    value: "eu",
+                  },
+                ],
               },
             ],
           },
-        ],
+        },
+      }),
+      makeActivity({
+        id: "user-input-url",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "user-input.requested",
+        summary: "User input requested",
+        tone: "info",
+        payload: {
+          requestId: "req-url",
+          request: {
+            kind: "url",
+            title: "Complete sign-in",
+            url: "https://example.com/device",
+            completionLabel: "Done",
+          },
+        },
+      }),
+    ];
+
+    expect(derivePendingUserInputs(activities)).toEqual([
+      {
+        requestId: "req-form",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        request: {
+          kind: "form",
+          title: "MCP auth",
+          submitLabel: "Continue",
+          fields: [
+            {
+              id: "api_key",
+              label: "API key",
+              input: "password",
+              required: true,
+            },
+            {
+              id: "region",
+              label: "Region",
+              input: "choice",
+              options: [
+                {
+                  label: "EU",
+                  value: "eu",
+                },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        requestId: "req-url",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        request: {
+          kind: "url",
+          title: "Complete sign-in",
+          url: "https://example.com/device",
+          completionLabel: "Done",
+        },
       },
     ]);
   });
@@ -673,18 +772,18 @@ describe("deriveActiveWorkStartedAt", () => {
 });
 
 describe("PROVIDER_OPTIONS", () => {
-  it("keeps Claude Code and Cursor visible as unavailable placeholders in the stack base", () => {
+  it("keeps Claude Code and Cursor visible in the stack base", () => {
     const claude = PROVIDER_OPTIONS.find((option) => option.value === "claudeCode");
     const cursor = PROVIDER_OPTIONS.find((option) => option.value === "cursor");
     expect(PROVIDER_OPTIONS).toEqual([
       { value: "codex", label: "Codex", available: true },
-      { value: "claudeCode", label: "Claude Code", available: false },
+      { value: "claudeCode", label: "Claude Code", available: true },
       { value: "cursor", label: "Cursor", available: false },
     ]);
     expect(claude).toEqual({
       value: "claudeCode",
       label: "Claude Code",
-      available: false,
+      available: true,
     });
     expect(cursor).toEqual({
       value: "cursor",

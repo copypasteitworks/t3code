@@ -91,6 +91,11 @@ function toRuntimePayloadFromSession(
   extra?: { readonly providerOptions?: unknown },
 ): Record<string, unknown> {
   return {
+    ...(session.runtimePayload &&
+    typeof session.runtimePayload === "object" &&
+    !Array.isArray(session.runtimePayload)
+      ? session.runtimePayload
+      : {}),
     cwd: session.cwd ?? null,
     model: session.model ?? null,
     activeTurnId: session.activeTurnId ?? null,

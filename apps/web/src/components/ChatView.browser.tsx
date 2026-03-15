@@ -19,6 +19,9 @@ import { setupWorker } from "msw/browser";
 import { page } from "vitest/browser";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
+import providerHealthBannerGolden from "../../../../features/claude-provider-health/golden/provider-health-banner-unauthenticated.json";
+import providerHealthBannerAntiFixture from "../../../../features/claude-provider-health/fixtures/anti-fixtures/provider-health-banner-unauthenticated-silent.json";
+import claudeUnauthenticatedServerConfig from "../../../../features/claude-provider-health/fixtures/inputs/server-config-claude-unauthenticated.json";
 
 import { useComposerDraftStore } from "../composerDraftStore";
 import { isMacPlatform } from "../lib/utils";
@@ -1028,6 +1031,64 @@ describe("ChatView timeline estimator parity (full app)", () => {
       );
 
       expect(getComputedStyle(stopButton).cursor).toBe("pointer");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("surfaces unavailable Claude health in the banner and provider picker", async () => {
+    const snapshot = createSnapshotForTargetUser({
+      targetMessageId: "msg-user-claude-health" as MessageId,
+      targetText: "claude provider health target",
+    });
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: {
+        ...snapshot,
+        threads: snapshot.threads.map((thread) =>
+          Object.assign({}, thread, {
+            model: "claude-sonnet-4-6",
+            session: thread.session
+              ? Object.assign({}, thread.session, {
+                  providerName: "claudeCode" as const,
+                })
+              : null,
+          }),
+        ),
+      },
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...claudeUnauthenticatedServerConfig,
+          keybindingsConfigPath: nextFixture.serverConfig.keybindingsConfigPath,
+        } as ServerConfig;
+      },
+    });
+
+    try {
+      await expect.element(page.getByText(providerHealthBannerGolden.title)).toBeInTheDocument();
+      await expect.element(page.getByText(providerHealthBannerGolden.message)).toBeInTheDocument();
+      await expect
+        .element(page.getByText(providerHealthBannerAntiFixture.message))
+        .not.toBeInTheDocument();
+
+      const providerPickerButton = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll("button")).find((button) =>
+            button.textContent?.includes("Claude Sonnet 4.6"),
+          ) as HTMLButtonElement | null,
+        "Unable to find the Claude provider picker button.",
+      );
+      providerPickerButton.click();
+
+      const unavailableClaudeEntry = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll("span")).find(
+            (element) => element.textContent?.trim() === "Claude Code",
+          ) as HTMLSpanElement | null,
+        "Unable to find the disabled Claude Code picker entry.",
+      );
+      expect(unavailableClaudeEntry.textContent?.trim()).toBe("Claude Code");
+      await expect.element(page.getByText("Beta")).toBeInTheDocument();
     } finally {
       await mounted.cleanup();
     }

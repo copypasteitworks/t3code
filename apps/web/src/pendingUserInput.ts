@@ -1,14 +1,9 @@
-import type { UserInputQuestion } from "@t3tools/contracts";
-
-export interface PendingUserInputDraftAnswer {
-  selectedOptionLabel?: string;
-  customAnswer?: string;
-}
+import type { ProviderUserInputRequest, UserInputQuestion } from "@t3tools/contracts";
 
 export interface PendingUserInputProgress {
   questionIndex: number;
   activeQuestion: UserInputQuestion | null;
-  activeDraft: PendingUserInputDraftAnswer | undefined;
+  activeAnswer: unknown;
   selectedOptionLabel: string | undefined;
   customAnswer: string;
   resolvedAnswer: string | null;
@@ -28,42 +23,52 @@ function normalizeDraftAnswer(value: string | undefined): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-export function resolvePendingUserInputAnswer(
-  draft: PendingUserInputDraftAnswer | undefined,
-): string | null {
-  const customAnswer = normalizeDraftAnswer(draft?.customAnswer);
-  if (customAnswer) {
-    return customAnswer;
-  }
-
-  return normalizeDraftAnswer(draft?.selectedOptionLabel);
+export function resolvePendingUserInputAnswer(draft: unknown): string | null {
+  return typeof draft === "string" ? normalizeDraftAnswer(draft) : null;
 }
 
-export function setPendingUserInputCustomAnswer(
-  draft: PendingUserInputDraftAnswer | undefined,
-  customAnswer: string,
-): PendingUserInputDraftAnswer {
-  const selectedOptionLabel =
-    customAnswer.trim().length > 0 ? undefined : draft?.selectedOptionLabel;
+export function setPendingUserInputCustomAnswer(_draft: unknown, customAnswer: string): string {
+  return customAnswer;
+}
 
-  return {
-    customAnswer,
-    ...(selectedOptionLabel ? { selectedOptionLabel } : {}),
-  };
+function normalizeQuestionnaireRequest(
+  requestOrQuestions: ProviderUserInputRequest | ReadonlyArray<UserInputQuestion>,
+): ProviderUserInputRequest {
+  return Array.isArray(requestOrQuestions)
+    ? { kind: "questionnaire", questions: [...requestOrQuestions] }
+    : (requestOrQuestions as ProviderUserInputRequest);
 }
 
 export function buildPendingUserInputAnswers(
-  questions: ReadonlyArray<UserInputQuestion>,
-  draftAnswers: Record<string, PendingUserInputDraftAnswer>,
-): Record<string, string> | null {
-  const answers: Record<string, string> = {};
+  requestOrQuestions: ProviderUserInputRequest | ReadonlyArray<UserInputQuestion>,
+  draftAnswers: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const request = normalizeQuestionnaireRequest(requestOrQuestions);
+  if (request.kind === "url") {
+    return {};
+  }
 
-  for (const question of questions) {
-    const answer = resolvePendingUserInputAnswer(draftAnswers[question.id]);
-    if (!answer) {
-      return null;
+  const answers: Record<string, unknown> = {};
+  if (request.kind === "questionnaire") {
+    for (const field of request.questions) {
+      const answer = resolvePendingUserInputAnswer(draftAnswers[field.id]);
+      if (!answer) {
+        return null;
+      }
+      answers[field.id] = answer;
     }
-    answers[question.id] = answer;
+    return answers;
+  }
+
+  for (const field of request.fields) {
+    const answer = draftAnswers[field.id];
+    if (answer === undefined || answer === null || answer === "") {
+      if (field.required) {
+        return null;
+      }
+      continue;
+    }
+    answers[field.id] = answer;
   }
 
   return answers;
@@ -71,7 +76,7 @@ export function buildPendingUserInputAnswers(
 
 export function countAnsweredPendingUserInputQuestions(
   questions: ReadonlyArray<UserInputQuestion>,
-  draftAnswers: Record<string, PendingUserInputDraftAnswer>,
+  draftAnswers: Record<string, unknown>,
 ): number {
   return questions.reduce((count, question) => {
     return resolvePendingUserInputAnswer(draftAnswers[question.id]) ? count + 1 : count;
@@ -80,7 +85,7 @@ export function countAnsweredPendingUserInputQuestions(
 
 export function findFirstUnansweredPendingUserInputQuestionIndex(
   questions: ReadonlyArray<UserInputQuestion>,
-  draftAnswers: Record<string, PendingUserInputDraftAnswer>,
+  draftAnswers: Record<string, unknown>,
 ): number {
   const unansweredIndex = questions.findIndex(
     (question) => !resolvePendingUserInputAnswer(draftAnswers[question.id]),
@@ -90,16 +95,28 @@ export function findFirstUnansweredPendingUserInputQuestionIndex(
 }
 
 export function derivePendingUserInputProgress(
-  questions: ReadonlyArray<UserInputQuestion>,
-  draftAnswers: Record<string, PendingUserInputDraftAnswer>,
+  requestOrQuestions:
+    | Extract<ProviderUserInputRequest, { kind: "questionnaire" }>
+    | ReadonlyArray<UserInputQuestion>,
+  draftAnswers: Record<string, unknown>,
   questionIndex: number,
 ): PendingUserInputProgress {
+  const request = normalizeQuestionnaireRequest(requestOrQuestions);
+  if (request.kind !== "questionnaire") {
+    throw new Error("derivePendingUserInputProgress only supports questionnaire requests.");
+  }
+  const questions = request.questions;
   const normalizedQuestionIndex =
     questions.length === 0 ? 0 : Math.max(0, Math.min(questionIndex, questions.length - 1));
   const activeQuestion = questions[normalizedQuestionIndex] ?? null;
-  const activeDraft = activeQuestion ? draftAnswers[activeQuestion.id] : undefined;
-  const resolvedAnswer = resolvePendingUserInputAnswer(activeDraft);
-  const customAnswer = activeDraft?.customAnswer ?? "";
+  const activeAnswer = activeQuestion ? draftAnswers[activeQuestion.id] : undefined;
+  const resolvedAnswer = resolvePendingUserInputAnswer(activeAnswer);
+  const selectedOptionLabel =
+    activeQuestion && resolvedAnswer
+      ? activeQuestion.options.find((option) => option.label === resolvedAnswer)?.label
+      : undefined;
+  const customAnswer =
+    typeof resolvedAnswer === "string" && selectedOptionLabel === undefined ? resolvedAnswer : "";
   const answeredQuestionCount = countAnsweredPendingUserInputQuestions(questions, draftAnswers);
   const isLastQuestion =
     questions.length === 0 ? true : normalizedQuestionIndex >= questions.length - 1;
@@ -107,14 +124,14 @@ export function derivePendingUserInputProgress(
   return {
     questionIndex: normalizedQuestionIndex,
     activeQuestion,
-    activeDraft,
-    selectedOptionLabel: activeDraft?.selectedOptionLabel,
+    activeAnswer,
+    selectedOptionLabel,
     customAnswer,
     resolvedAnswer,
     usingCustomAnswer: customAnswer.trim().length > 0,
     answeredQuestionCount,
     isLastQuestion,
-    isComplete: buildPendingUserInputAnswers(questions, draftAnswers) !== null,
+    isComplete: buildPendingUserInputAnswers(request, draftAnswers) !== null,
     canAdvance: Boolean(resolvedAnswer),
   };
 }

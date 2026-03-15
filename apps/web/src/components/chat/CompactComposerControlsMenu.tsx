@@ -1,5 +1,5 @@
 import {
-  type CodexReasoningEffort,
+  type ProviderEffort,
   type ProviderKind,
   RuntimeMode,
   ProviderInteractionMode,
@@ -24,22 +24,23 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
   interactionMode: ProviderInteractionMode;
   planSidebarOpen: boolean;
   runtimeMode: RuntimeMode;
-  selectedEffort: CodexReasoningEffort | null;
+  selectedEffort: ProviderEffort | null;
   selectedProvider: ProviderKind;
   selectedCodexFastModeEnabled: boolean;
-  reasoningOptions: ReadonlyArray<CodexReasoningEffort>;
-  onEffortSelect: (effort: CodexReasoningEffort) => void;
+  reasoningOptions: ReadonlyArray<ProviderEffort>;
+  onEffortSelect: (effort: ProviderEffort) => void;
   onCodexFastModeChange: (enabled: boolean) => void;
   onToggleInteractionMode: () => void;
   onTogglePlanSidebar: () => void;
   onToggleRuntimeMode: () => void;
 }) {
   const defaultReasoningEffort = getDefaultReasoningEffort("codex");
-  const reasoningLabelByOption: Record<CodexReasoningEffort, string> = {
+  const reasoningLabelByOption: Record<ProviderEffort, string> = {
     low: "Low",
     medium: "Medium",
     high: "High",
     xhigh: "Extra High",
+    max: "Max",
   };
 
   return (
@@ -57,10 +58,12 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
         <EllipsisIcon aria-hidden="true" className="size-4" />
       </MenuTrigger>
       <MenuPopup align="start">
-        {props.selectedProvider === "codex" && props.selectedEffort != null ? (
+        {props.selectedEffort != null ? (
           <>
             <MenuGroup>
-              <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Reasoning</div>
+              <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">
+                {props.selectedProvider === "claudeCode" ? "Effort" : "Reasoning"}
+              </div>
               <MenuRadioGroup
                 value={props.selectedEffort}
                 onValueChange={(value) => {
@@ -73,24 +76,32 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
                 {props.reasoningOptions.map((effort) => (
                   <MenuRadioItem key={effort} value={effort}>
                     {reasoningLabelByOption[effort]}
-                    {effort === defaultReasoningEffort ? " (default)" : ""}
+                    {props.selectedProvider === "codex" && effort === defaultReasoningEffort
+                      ? " (default)"
+                      : ""}
                   </MenuRadioItem>
                 ))}
               </MenuRadioGroup>
             </MenuGroup>
-            <MenuDivider />
-            <MenuGroup>
-              <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Fast Mode</div>
-              <MenuRadioGroup
-                value={props.selectedCodexFastModeEnabled ? "on" : "off"}
-                onValueChange={(value) => {
-                  props.onCodexFastModeChange(value === "on");
-                }}
-              >
-                <MenuRadioItem value="off">off</MenuRadioItem>
-                <MenuRadioItem value="on">on</MenuRadioItem>
-              </MenuRadioGroup>
-            </MenuGroup>
+            {props.selectedProvider === "codex" ? (
+              <>
+                <MenuDivider />
+                <MenuGroup>
+                  <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">
+                    Fast Mode
+                  </div>
+                  <MenuRadioGroup
+                    value={props.selectedCodexFastModeEnabled ? "on" : "off"}
+                    onValueChange={(value) => {
+                      props.onCodexFastModeChange(value === "on");
+                    }}
+                  >
+                    <MenuRadioItem value="off">off</MenuRadioItem>
+                    <MenuRadioItem value="on">on</MenuRadioItem>
+                  </MenuRadioGroup>
+                </MenuGroup>
+              </>
+            ) : null}
             <MenuDivider />
           </>
         ) : null}

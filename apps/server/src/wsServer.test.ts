@@ -53,6 +53,8 @@ import { GitCore } from "./git/Services/GitCore.ts";
 import { GitCommandError, GitManagerError } from "./git/Errors.ts";
 import { MigrationError } from "@effect/sql-sqlite-bun/SqliteMigrator";
 import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
+import claudeUnauthenticatedServerConfigGolden from "../../../features/claude-provider-health/golden/server-get-config-claude-unauthenticated.json";
+import claudeMissingServerConfigAntiFixture from "../../../features/claude-provider-health/fixtures/anti-fixtures/server-get-config-claude-missing.json";
 
 const asEventId = (value: string): EventId => EventId.makeUnsafe(value);
 const asProviderItemId = (value: string): ProviderItemId => ProviderItemId.makeUnsafe(value);
@@ -77,6 +79,24 @@ const defaultProviderStatuses: ReadonlyArray<ServerProviderStatus> = [
 const defaultProviderHealthService: ProviderHealthShape = {
   getStatuses: Effect.succeed(defaultProviderStatuses),
 };
+
+function normalizeServerConfigForGolden(input: {
+  cwd: string;
+  keybindingsConfigPath: string;
+  keybindings: unknown;
+  issues: unknown;
+  providers: unknown;
+  availableEditors: unknown;
+}) {
+  return {
+    cwd: input.cwd,
+    keybindingsConfigPath: "<STATE_DIR>/keybindings.json",
+    keybindings: [],
+    issues: input.issues,
+    providers: input.providers,
+    availableEditors: [],
+  };
+}
 
 class MockTerminalManager implements TerminalManagerShape {
   private readonly sessions = new Map<string, TerminalSessionSnapshot>();
@@ -835,6 +855,44 @@ describe("WebSocket Server", () => {
     expectAvailableEditors((response.result as { availableEditors: unknown }).availableEditors);
   });
 
+  it("preserves unavailable Claude provider health in server.getConfig", async () => {
+    const stateDir = makeTempDir("t3code-state-claude-provider-health-");
+    const keybindingsPath = path.join(stateDir, "keybindings.json");
+    fs.writeFileSync(keybindingsPath, "[]", "utf8");
+
+    server = await createTestServer({
+      cwd: "/repo/project",
+      stateDir,
+      providerHealth: {
+        getStatuses: Effect.succeed(
+          claudeUnauthenticatedServerConfigGolden.providers as ReadonlyArray<ServerProviderStatus>,
+        ),
+      },
+    });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const response = await sendRequest(ws, WS_METHODS.serverGetConfig);
+    expect(response.error).toBeUndefined();
+
+    const normalized = normalizeServerConfigForGolden(
+      response.result as {
+        cwd: string;
+        keybindingsConfigPath: string;
+        keybindings: unknown;
+        issues: unknown;
+        providers: unknown;
+        availableEditors: unknown;
+      },
+    );
+
+    expect(normalized).toEqual(claudeUnauthenticatedServerConfigGolden);
+    expect(normalized).not.toEqual(claudeMissingServerConfigAntiFixture);
+  });
+
   it("bootstraps default keybindings file when missing", async () => {
     const stateDir = makeTempDir("t3code-state-bootstrap-keybindings-");
     const keybindingsPath = path.join(stateDir, "keybindings.json");
@@ -1226,7 +1284,8 @@ describe("WebSocket Server", () => {
       respondToUserInput: () => unsupported(),
       stopSession: () => unsupported(),
       listSessions: () => Effect.succeed([]),
-      getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
+      getCapabilities: () =>
+        Effect.succeed({ sessionModelSwitch: "in-session", conversationRollback: "supported" }),
       rollbackConversation: () => unsupported(),
       streamEvents: Stream.fromPubSub(runtimeEventPubSub),
     };

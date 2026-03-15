@@ -3,8 +3,8 @@ import {
   DEFAULT_MODEL_BY_PROVIDER,
   type EditorId,
   type KeybindingCommand,
-  type CodexReasoningEffort,
   type MessageId,
+  type ProviderEffort,
   type ProjectId,
   type ProjectEntry,
   type ProjectScript,
@@ -60,12 +60,7 @@ import {
   formatElapsed,
 } from "../session-logic";
 import { isScrollContainerNearBottom } from "../chat-scroll";
-import {
-  buildPendingUserInputAnswers,
-  derivePendingUserInputProgress,
-  setPendingUserInputCustomAnswer,
-  type PendingUserInputDraftAnswer,
-} from "../pendingUserInput";
+import { buildPendingUserInputAnswers, derivePendingUserInputProgress } from "../pendingUserInput";
 import { useStore } from "../store";
 import {
   buildPlanImplementationThreadTitle,
@@ -134,7 +129,7 @@ import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
 import { ChatHeader } from "./chat/ChatHeader";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./chat/ExpandedImagePreview";
-import { AVAILABLE_PROVIDER_OPTIONS, ProviderModelPicker } from "./chat/ProviderModelPicker";
+import { ProviderModelPicker } from "./chat/ProviderModelPicker";
 import { ComposerCommandItem, ComposerCommandMenu } from "./chat/ComposerCommandMenu";
 import { ComposerPendingApprovalActions } from "./chat/ComposerPendingApprovalActions";
 import { CodexTraitsPicker } from "./chat/CodexTraitsPicker";
@@ -169,7 +164,7 @@ const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
 const EMPTY_PROJECT_ENTRIES: ProjectEntry[] = [];
 const EMPTY_AVAILABLE_EDITORS: EditorId[] = [];
 const EMPTY_PROVIDER_STATUSES: ServerProviderStatus[] = [];
-const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
+const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, unknown> = {};
 const COMPOSER_PATH_QUERY_DEBOUNCE_MS = 120;
 const SCRIPT_TERMINAL_COLS = 120;
 const SCRIPT_TERMINAL_ROWS = 30;
@@ -260,7 +255,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     ApprovalRequestId[]
   >([]);
   const [pendingUserInputAnswersByRequestId, setPendingUserInputAnswersByRequestId] = useState<
-    Record<string, Record<string, PendingUserInputDraftAnswer>>
+    Record<string, Record<string, unknown>>
   >({});
   const [pendingUserInputQuestionIndexByRequestId, setPendingUserInputQuestionIndexByRequestId] =
     useState<Record<string, number>>({});
@@ -500,7 +495,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
     selectedProvider,
     activeThread?.model ?? activeProject?.model ?? getDefaultModel(selectedProvider),
   );
-  const customModelsForSelectedProvider = settings.customCodexModels;
+  const customModelsForSelectedProvider =
+    selectedProvider === "claudeCode"
+      ? settings.customClaudeCodeModels
+      : settings.customCodexModels;
   const selectedModel = useMemo(() => {
     const draftModel = composerDraft.model;
     if (!draftModel) {
@@ -515,34 +513,113 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const reasoningOptions = getReasoningEffortOptions(selectedProvider);
   const supportsReasoningEffort = reasoningOptions.length > 0;
   const selectedEffort = composerDraft.effort ?? getDefaultReasoningEffort(selectedProvider);
+  const selectedCodexEffort =
+    selectedProvider === "codex" &&
+    (selectedEffort === "xhigh" ||
+      selectedEffort === "high" ||
+      selectedEffort === "medium" ||
+      selectedEffort === "low")
+      ? selectedEffort
+      : null;
+  const selectedClaudeEffort =
+    selectedProvider === "claudeCode" &&
+    (selectedEffort === "low" ||
+      selectedEffort === "medium" ||
+      selectedEffort === "high" ||
+      selectedEffort === "max")
+      ? selectedEffort
+      : null;
+  const codexReasoningOptions =
+    selectedProvider === "codex"
+      ? reasoningOptions.filter(
+          (option): option is "xhigh" | "high" | "medium" | "low" =>
+            option === "xhigh" || option === "high" || option === "medium" || option === "low",
+        )
+      : [];
   const selectedCodexFastModeEnabled =
     selectedProvider === "codex" ? composerDraft.codexFastMode : false;
   const selectedModelOptionsForDispatch = useMemo(() => {
-    if (selectedProvider !== "codex") {
-      return undefined;
+    if (selectedProvider === "codex") {
+      const codexOptions = {
+        ...(supportsReasoningEffort && selectedCodexEffort
+          ? { reasoningEffort: selectedCodexEffort }
+          : {}),
+        ...(selectedCodexFastModeEnabled ? { fastMode: true } : {}),
+      };
+      return Object.keys(codexOptions).length > 0 ? { codex: codexOptions } : undefined;
     }
-    const codexOptions = {
-      ...(supportsReasoningEffort && selectedEffort ? { reasoningEffort: selectedEffort } : {}),
-      ...(selectedCodexFastModeEnabled ? { fastMode: true } : {}),
-    };
-    return Object.keys(codexOptions).length > 0 ? { codex: codexOptions } : undefined;
-  }, [selectedCodexFastModeEnabled, selectedEffort, selectedProvider, supportsReasoningEffort]);
+    if (selectedProvider === "claudeCode") {
+      return supportsReasoningEffort && selectedClaudeEffort
+        ? { claudeCode: { effort: selectedClaudeEffort } }
+        : undefined;
+    }
+    return undefined;
+  }, [
+    selectedClaudeEffort,
+    selectedCodexEffort,
+    selectedCodexFastModeEnabled,
+    selectedProvider,
+    supportsReasoningEffort,
+  ]);
   const providerOptionsForDispatch = useMemo(() => {
-    if (!settings.codexBinaryPath && !settings.codexHomePath) {
+    if (selectedProvider === "codex") {
+      if (!settings.codexBinaryPath && !settings.codexHomePath) {
+        return undefined;
+      }
+      return {
+        codex: {
+          ...(settings.codexBinaryPath ? { binaryPath: settings.codexBinaryPath } : {}),
+          ...(settings.codexHomePath ? { homePath: settings.codexHomePath } : {}),
+        },
+      };
+    }
+    const claudeSettingSources = settings.claudeCodeSettingSources;
+    if (
+      !settings.claudeCodeBinaryPath &&
+      !settings.claudeCodeConfigDir &&
+      !settings.claudeCodeMcpConfigPath &&
+      !settings.claudeCodeStrictMcpConfig &&
+      claudeSettingSources.length === 0
+    ) {
       return undefined;
     }
     return {
-      codex: {
-        ...(settings.codexBinaryPath ? { binaryPath: settings.codexBinaryPath } : {}),
-        ...(settings.codexHomePath ? { homePath: settings.codexHomePath } : {}),
+      claudeCode: {
+        ...(settings.claudeCodeBinaryPath ? { binaryPath: settings.claudeCodeBinaryPath } : {}),
+        ...(settings.claudeCodeConfigDir ? { configDir: settings.claudeCodeConfigDir } : {}),
+        ...(settings.claudeCodeMcpConfigPath
+          ? { mcpConfigPath: settings.claudeCodeMcpConfigPath }
+          : {}),
+        ...(settings.claudeCodeStrictMcpConfig ? { strictMcpConfig: true } : {}),
+        ...(claudeSettingSources.length > 0 ? { settingSources: [...claudeSettingSources] } : {}),
       },
     };
-  }, [settings.codexBinaryPath, settings.codexHomePath]);
+  }, [
+    selectedProvider,
+    settings.claudeCodeBinaryPath,
+    settings.claudeCodeConfigDir,
+    settings.claudeCodeMcpConfigPath,
+    settings.claudeCodeSettingSources,
+    settings.claudeCodeStrictMcpConfig,
+    settings.codexBinaryPath,
+    settings.codexHomePath,
+  ]);
   const selectedModelForPicker = selectedModel;
+  const serverConfigQuery = useQuery(serverConfigQueryOptions());
   const modelOptionsByProvider = useMemo(
     () => getCustomModelOptionsByProvider(settings),
     [settings],
   );
+  const providerStatuses = serverConfigQuery.data?.providers ?? EMPTY_PROVIDER_STATUSES;
+  const availableProviders = useMemo(() => {
+    const readyProviders = providerStatuses
+      .filter((status) => status.available)
+      .map((status) => status.provider);
+    if (readyProviders.length > 0) {
+      return readyProviders;
+    }
+    return [selectedProvider];
+  }, [providerStatuses, selectedProvider]);
   const selectedModelForPickerWithCustomFallback = useMemo(() => {
     const currentOptions = modelOptionsByProvider[selectedProvider];
     return currentOptions.some((option) => option.slug === selectedModelForPicker)
@@ -551,20 +628,20 @@ export default function ChatView({ threadId }: ChatViewProps) {
   }, [modelOptionsByProvider, selectedModelForPicker, selectedProvider]);
   const searchableModelOptions = useMemo(
     () =>
-      AVAILABLE_PROVIDER_OPTIONS.filter(
-        (option) => lockedProvider === null || option.value === lockedProvider,
-      ).flatMap((option) =>
-        modelOptionsByProvider[option.value].map(({ slug, name }) => ({
-          provider: option.value,
-          providerLabel: option.label,
-          slug,
-          name,
-          searchSlug: slug.toLowerCase(),
-          searchName: name.toLowerCase(),
-          searchProvider: option.label.toLowerCase(),
-        })),
-      ),
-    [lockedProvider, modelOptionsByProvider],
+      availableProviders
+        .filter((provider) => lockedProvider === null || provider === lockedProvider)
+        .flatMap((provider) =>
+          modelOptionsByProvider[provider].map(({ slug, name }) => ({
+            provider,
+            providerLabel: provider === "claudeCode" ? "Claude Code" : "Codex",
+            slug,
+            name,
+            searchSlug: slug.toLowerCase(),
+            searchName: name.toLowerCase(),
+            searchProvider: (provider === "claudeCode" ? "Claude Code" : "Codex").toLowerCase(),
+          })),
+        ),
+    [availableProviders, lockedProvider, modelOptionsByProvider],
   );
   const phase = derivePhase(activeThread?.session ?? null);
   const isSendBusy = sendPhase !== "idle";
@@ -607,9 +684,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
     : 0;
   const activePendingProgress = useMemo(
     () =>
-      activePendingUserInput
+      activePendingUserInput?.request.kind === "questionnaire"
         ? derivePendingUserInputProgress(
-            activePendingUserInput.questions,
+            activePendingUserInput.request,
             activePendingDraftAnswers,
             activePendingQuestionIndex,
           )
@@ -619,7 +696,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const activePendingResolvedAnswers = useMemo(
     () =>
       activePendingUserInput
-        ? buildPendingUserInputAnswers(activePendingUserInput.questions, activePendingDraftAnswers)
+        ? buildPendingUserInputAnswers(activePendingUserInput.request, activePendingDraftAnswers)
         : null,
     [activePendingDraftAnswers, activePendingUserInput],
   );
@@ -825,6 +902,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
     return byMessageId;
   }, [turnDiffSummaries]);
   const revertTurnCountByUserMessageId = useMemo(() => {
+    if (activeThread?.session?.provider === "claudeCode") {
+      return new Map<MessageId, number>();
+    }
     const byUserMessageId = new Map<MessageId, number>();
     for (let index = 0; index < timelineEntries.length; index += 1) {
       const entry = timelineEntries[index];
@@ -855,7 +935,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }
 
     return byUserMessageId;
-  }, [inferredCheckpointTurnCountByTurnId, timelineEntries, turnDiffSummaryByAssistantMessageId]);
+  }, [
+    activeThread?.session?.provider,
+    inferredCheckpointTurnCountByTurnId,
+    timelineEntries,
+    turnDiffSummaryByAssistantMessageId,
+  ]);
 
   const completionSummary = useMemo(() => {
     if (!latestTurnSettled) return null;
@@ -913,7 +998,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
   );
   const effectivePathQuery = pathTriggerQuery.length > 0 ? debouncedPathQuery : "";
   const branchesQuery = useQuery(gitBranchesQueryOptions(gitCwd));
-  const serverConfigQuery = useQuery(serverConfigQueryOptions());
   const workspaceEntriesQuery = useQuery(
     projectSearchEntriesQueryOptions({
       cwd: gitCwd,
@@ -1003,7 +1087,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
   );
   const keybindings = serverConfigQuery.data?.keybindings ?? EMPTY_KEYBINDINGS;
   const availableEditors = serverConfigQuery.data?.availableEditors ?? EMPTY_AVAILABLE_EDITORS;
-  const providerStatuses = serverConfigQuery.data?.providers ?? EMPTY_PROVIDER_STATUSES;
   const activeProvider = activeThread?.session?.provider ?? "codex";
   const activeProviderStatus = useMemo(
     () => providerStatuses.find((status) => status.provider === activeProvider) ?? null,
@@ -2563,10 +2646,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         ...existing,
         [activePendingUserInput.requestId]: {
           ...existing[activePendingUserInput.requestId],
-          [questionId]: {
-            selectedOptionLabel: optionLabel,
-            customAnswer: "",
-          },
+          [questionId]: optionLabel,
         },
       }));
       promptRef.current = "";
@@ -2592,16 +2672,29 @@ export default function ChatView({ threadId }: ChatViewProps) {
         ...existing,
         [activePendingUserInput.requestId]: {
           ...existing[activePendingUserInput.requestId],
-          [questionId]: setPendingUserInputCustomAnswer(
-            existing[activePendingUserInput.requestId]?.[questionId],
-            value,
-          ),
+          [questionId]: value,
         },
       }));
       setComposerCursor(nextCursor);
       setComposerTrigger(
         cursorAdjacentToMention ? null : detectComposerTrigger(value, expandedCursor),
       );
+    },
+    [activePendingUserInput],
+  );
+
+  const onUpdateActivePendingUserInputAnswer = useCallback(
+    (fieldId: string, value: unknown) => {
+      if (!activePendingUserInput) {
+        return;
+      }
+      setPendingUserInputAnswersByRequestId((existing) => ({
+        ...existing,
+        [activePendingUserInput.requestId]: {
+          ...existing[activePendingUserInput.requestId],
+          [fieldId]: value,
+        },
+      }));
     },
     [activePendingUserInput],
   );
@@ -2624,6 +2717,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
     onRespondToUserInput,
     setActivePendingUserInputQuestionIndex,
   ]);
+
+  const onSubmitActivePendingUserInput = useCallback(() => {
+    if (!activePendingUserInput || !activePendingResolvedAnswers) {
+      return;
+    }
+    void onRespondToUserInput(activePendingUserInput.requestId, activePendingResolvedAnswers);
+  }, [activePendingResolvedAnswers, activePendingUserInput, onRespondToUserInput]);
 
   const onPreviousActivePendingUserInputQuestion = useCallback(() => {
     if (!activePendingProgress) {
@@ -2879,10 +2979,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
         scheduleComposerFocus();
         return;
       }
+      const customModels =
+        provider === "claudeCode" ? settings.customClaudeCodeModels : settings.customCodexModels;
       setComposerDraftProvider(activeThread.id, provider);
       setComposerDraftModel(
         activeThread.id,
-        resolveAppModelSelection(provider, settings.customCodexModels, model),
+        resolveAppModelSelection(provider, customModels, model),
       );
       scheduleComposerFocus();
     },
@@ -2892,11 +2994,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
       scheduleComposerFocus,
       setComposerDraftModel,
       setComposerDraftProvider,
+      settings.customClaudeCodeModels,
       settings.customCodexModels,
     ],
   );
   const onEffortSelect = useCallback(
-    (effort: CodexReasoningEffort) => {
+    (effort: ProviderEffort) => {
       setComposerDraftEffort(threadId, effort);
       scheduleComposerFocus();
     },
@@ -2944,10 +3047,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           ...existing,
           [activePendingUserInput.requestId]: {
             ...existing[activePendingUserInput.requestId],
-            [activePendingQuestion.id]: setPendingUserInputCustomAnswer(
-              existing[activePendingUserInput.requestId]?.[activePendingQuestion.id],
-              next.text,
-            ),
+            [activePendingQuestion.id]: next.text,
           },
         }));
       } else {
@@ -3347,11 +3447,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
                   <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
                     <ComposerPendingUserInputPanel
                       pendingUserInputs={pendingUserInputs}
-                      respondingRequestIds={respondingRequestIds}
+                      respondingRequestIds={respondingUserInputRequestIds}
                       answers={activePendingDraftAnswers}
                       questionIndex={activePendingQuestionIndex}
                       onSelectOption={onSelectActivePendingUserInputOption}
+                      onUpdateAnswer={onUpdateActivePendingUserInputAnswer}
                       onAdvance={onAdvanceActivePendingUserInput}
+                      onSubmit={onSubmitActivePendingUserInput}
                     />
                   </div>
                 ) : showPlanFollowUpPrompt && activeProposedPlan ? (
@@ -3515,6 +3617,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                         provider={selectedProvider}
                         model={selectedModelForPickerWithCustomFallback}
                         lockedProvider={lockedProvider}
+                        availableProviders={availableProviders}
                         modelOptionsByProvider={modelOptionsByProvider}
                         onProviderModelChange={onProviderModelSelect}
                       />
@@ -3537,16 +3640,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
                         />
                       ) : (
                         <>
-                          {selectedProvider === "codex" && selectedEffort != null ? (
+                          {selectedProvider === "codex" && selectedCodexEffort != null ? (
                             <>
                               <Separator
                                 orientation="vertical"
                                 className="mx-0.5 hidden h-4 sm:block"
                               />
                               <CodexTraitsPicker
-                                effort={selectedEffort}
+                                effort={selectedCodexEffort}
                                 fastModeEnabled={selectedCodexFastModeEnabled}
-                                options={reasoningOptions}
+                                options={codexReasoningOptions}
                                 onEffortChange={onEffortSelect}
                                 onFastModeChange={onCodexFastModeChange}
                               />

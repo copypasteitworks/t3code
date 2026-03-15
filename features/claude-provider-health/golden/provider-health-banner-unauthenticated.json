@@ -1,0 +1,4 @@
+{
+  "title": "Claude Code provider status",
+  "message": "Claude Code is not authenticated. Run `claude auth login` and try again."
+}

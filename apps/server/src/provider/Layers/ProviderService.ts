@@ -219,13 +219,20 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
 
         const persistedCwd = readPersistedCwd(input.binding.runtimePayload);
         const persistedProviderOptions = readPersistedProviderOptions(input.binding.runtimePayload);
+        const resumeCursorInput =
+          input.binding.provider === "claudeCode" && input.binding.runtimePayload !== undefined
+            ? {
+                resumeCursor: input.binding.resumeCursor,
+                runtimePayload: input.binding.runtimePayload,
+              }
+            : input.binding.resumeCursor;
 
         const resumed = yield* adapter.startSession({
           threadId: input.binding.threadId,
           provider: input.binding.provider,
           ...(persistedCwd ? { cwd: persistedCwd } : {}),
           ...(persistedProviderOptions ? { providerOptions: persistedProviderOptions } : {}),
-          ...(hasResumeCursor ? { resumeCursor: input.binding.resumeCursor } : {}),
+          ...(hasResumeCursor ? { resumeCursor: resumeCursorInput } : {}),
           runtimeMode: input.binding.runtimeMode ?? "full-access",
         });
         if (resumed.provider !== adapter.provider) {

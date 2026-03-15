@@ -93,7 +93,14 @@ export function readClaudeCodeRuntimePayload(value: unknown): ClaudeCodeRuntimeP
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return null;
   }
-  const record = value as Record<string, unknown>;
+  const outerRecord = value as Record<string, unknown>;
+  const nestedRuntimePayload =
+    outerRecord.runtimePayload &&
+    typeof outerRecord.runtimePayload === "object" &&
+    !Array.isArray(outerRecord.runtimePayload)
+      ? (outerRecord.runtimePayload as Record<string, unknown>)
+      : undefined;
+  const record = nestedRuntimePayload ?? outerRecord;
   const sessionId = normalizedNonEmptyString(record.sessionId);
   if (!isValidSessionId(sessionId)) {
     return null;

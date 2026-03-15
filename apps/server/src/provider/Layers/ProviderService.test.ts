@@ -196,9 +196,14 @@ function makeFakeCodexAdapter(provider: ProviderKind = "codex") {
     Effect.runSync(PubSub.publish(runtimeEventPubSub, event as unknown as ProviderRuntimeEvent));
   };
 
+  const setSession = (threadId: ThreadId, session: ProviderSession): void => {
+    sessions.set(threadId, session);
+  };
+
   return {
     adapter,
     emit,
+    setSession,
     startSession,
     sendTurn,
     interruptTurn,
@@ -738,6 +743,94 @@ routing.layer("ProviderServiceLive routing", (it) => {
         }
       }
     }),
+  );
+
+  it.effect("persists provider runtime payload before stopAll clears Claude sessions", () =>
+    Effect.gen(function* () {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "t3-provider-service-shutdown-"));
+      const dbPath = path.join(tempDir, "orchestration.sqlite");
+      const persistenceLayer = makeSqlitePersistenceLive(dbPath);
+      const runtimeRepositoryLayer = ProviderSessionRuntimeRepositoryLive.pipe(
+        Layer.provide(persistenceLayer),
+      );
+      const directoryLayer = ProviderSessionDirectoryLive.pipe(
+        Layer.provide(runtimeRepositoryLayer),
+      );
+      const claude = makeFakeCodexAdapter("claudeCode");
+      const registry: typeof ProviderAdapterRegistry.Service = {
+        getByProvider: (provider) =>
+          provider === "claudeCode"
+            ? Effect.succeed(claude.adapter)
+            : Effect.fail(new ProviderUnsupportedError({ provider })),
+        listProviders: () => Effect.succeed(["claudeCode"]),
+      };
+      const providerLayer = makeProviderServiceLive().pipe(
+        Layer.provide(Layer.succeed(ProviderAdapterRegistry, registry)),
+        Layer.provide(directoryLayer),
+        Layer.provide(AnalyticsService.layerTest),
+      );
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const provider = yield* ProviderService;
+          const session = yield* provider.startSession(asThreadId("thread-claude-stopall"), {
+            provider: "claudeCode",
+            threadId: asThreadId("thread-claude-stopall"),
+            runtimeMode: "full-access",
+            cwd: "/tmp/project-claude",
+          });
+          claude.setSession(session.threadId, {
+            ...session,
+            resumeCursor: { sessionId: "sess-claude-stopall" },
+            runtimePayload: {
+              cwd: "/tmp/project-claude",
+              sessionId: "sess-claude-stopall",
+              lastKnownModel: "sonnet",
+              lastCompletedTurnAt: "2026-03-15T15:00:00.000Z",
+              providerOptions: {
+                claudeCode: {
+                  binaryPath: "/tmp/t3-claude-wrapper.cjs",
+                  settingSources: ["user", "local"],
+                },
+              },
+            },
+          });
+        }).pipe(Effect.provide(providerLayer)),
+      );
+
+      const runtime = yield* Effect.gen(function* () {
+        const repository = yield* ProviderSessionRuntimeRepository;
+        return yield* repository.getByThreadId({ threadId: asThreadId("thread-claude-stopall") });
+      }).pipe(Effect.provide(runtimeRepositoryLayer));
+
+      assert.equal(Option.isSome(runtime), true);
+      if (Option.isSome(runtime)) {
+        assert.equal(runtime.value.status, "stopped");
+        assert.deepEqual(runtime.value.resumeCursor, { sessionId: "sess-claude-stopall" });
+        const payload = runtime.value.runtimePayload;
+        assert.equal(payload !== null && typeof payload === "object" && !Array.isArray(payload), true);
+        if (payload !== null && typeof payload === "object" && !Array.isArray(payload)) {
+          const record = payload as Record<string, unknown>;
+          assert.equal(record.cwd, "/tmp/project-claude");
+          assert.equal(record.sessionId, "sess-claude-stopall");
+          assert.equal(record.lastKnownModel, "sonnet");
+          assert.equal(record.lastCompletedTurnAt, "2026-03-15T15:00:00.000Z");
+          assert.deepEqual(record.providerOptions, {
+            claudeCode: {
+              binaryPath: "/tmp/t3-claude-wrapper.cjs",
+              settingSources: ["user", "local"],
+            },
+          });
+          assert.equal(record.model, null);
+          assert.equal(record.activeTurnId, null);
+          assert.equal(record.lastError, null);
+          assert.equal(record.lastRuntimeEvent, "provider.stopAll");
+          assert.equal(typeof record.lastRuntimeEventAt, "string");
+        }
+      }
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }).pipe(Effect.provide(NodeServices.layer)),
   );
 });
 

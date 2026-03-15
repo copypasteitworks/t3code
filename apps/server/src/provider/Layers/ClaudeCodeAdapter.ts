@@ -53,6 +53,13 @@ import {
   toClaudeCodeTurnStartResult,
   type ClaudeCodeLogicalSessionState,
 } from "../claudeCode/sessionState.ts";
+import {
+  consumeActiveToolCall,
+  isExpectedClaudeCodeExit,
+  removeActiveToolCall,
+  type ClaudeCodeActiveToolCall,
+  type ClaudeCodeExpectedExit,
+} from "../claudeCode/turnRuntime.ts";
 
 type PendingApprovalRequest = {
   readonly toolName?: string;
@@ -69,7 +76,7 @@ interface TurnRuntimeState {
   readonly cleanup: () => Promise<void>;
   readonly pendingApprovalRequests: Map<string, PendingApprovalRequest>;
   readonly pendingUserInputRequests: Map<string, PendingUserInputRequest>;
-  interrupted: boolean;
+  readonly activeToolCalls: Array<ClaudeCodeActiveToolCall>;
 }
 
 export interface ClaudeCodeAdapterLiveOptions {
@@ -146,6 +153,7 @@ export const makeClaudeCodeAdapterLive = (options?: ClaudeCodeAdapterLiveOptions
         options?.hookGateway ?? (yield* Effect.promise(() => createClaudeCodeHookGateway()));
       const sessions = new Map<ThreadId, ClaudeCodeLogicalSessionState>();
       const turnStateByThreadId = new Map<ThreadId, TurnRuntimeState>();
+      const expectedExitByThreadId = new Map<ThreadId, ClaudeCodeExpectedExit>();
 
       const emit = (...events: ReadonlyArray<ProviderRuntimeEvent>) =>
         Effect.forEach(events, (event) => PubSub.publish(eventPubSub, event), {
@@ -218,6 +226,12 @@ export const makeClaudeCodeAdapterLive = (options?: ClaudeCodeAdapterLiveOptions
                       : {}),
                     payload: hookPayload,
                   });
+                  turnState.activeToolCalls.push({
+                    itemId: opened.itemId,
+                    ...(typeof hookPayload.toolName === "string"
+                      ? { toolName: hookPayload.toolName }
+                      : {}),
+                  });
                   await Effect.runPromise(emit(...opened.events));
                   const toolName =
                     typeof hookPayload.toolName === "string" ? hookPayload.toolName : "";
@@ -237,6 +251,7 @@ export const makeClaudeCodeAdapterLive = (options?: ClaudeCodeAdapterLiveOptions
                         }),
                       ),
                     );
+                    turnState.pendingApprovalRequests.delete(opened.requestId);
                     return {
                       exitCode: 0,
                       stdout: JSON.stringify({ permissionDecision: "allow" }),
@@ -265,6 +280,9 @@ export const makeClaudeCodeAdapterLive = (options?: ClaudeCodeAdapterLiveOptions
                       }),
                     ),
                   );
+                  if (decision === "decline") {
+                    removeActiveToolCall(turnState.activeToolCalls, opened.itemId);
+                  }
                   return {
                     exitCode: 0,
                     stdout: JSON.stringify({
@@ -274,15 +292,17 @@ export const makeClaudeCodeAdapterLive = (options?: ClaudeCodeAdapterLiveOptions
                   };
                 }
                 if (eventName === "PostToolUse" || eventName === "PostToolUseFailure") {
-                  const latestRequest = [...turnState.pendingApprovalRequests.values()].at(-1);
-                  if (latestRequest) {
+                  const toolName =
+                    typeof hookPayload.toolName === "string" ? hookPayload.toolName : undefined;
+                  const activeToolCall = consumeActiveToolCall(turnState.activeToolCalls, toolName);
+                  if (activeToolCall) {
                     await Effect.runPromise(
                       emit(
                         ...createClaudeCodeToolCompletedEvents({
                           threadId: input.threadId,
                           turnId,
-                          itemId: latestRequest.itemId,
-                          ...(latestRequest.toolName ? { toolName: latestRequest.toolName } : {}),
+                          itemId: activeToolCall.itemId,
+                          ...(activeToolCall.toolName ? { toolName: activeToolCall.toolName } : {}),
                           succeeded: eventName === "PostToolUse",
                           payload: hookPayload,
                         }),
@@ -375,6 +395,7 @@ export const makeClaudeCodeAdapterLive = (options?: ClaudeCodeAdapterLiveOptions
             );
             const pendingApprovalRequests = new Map<string, PendingApprovalRequest>();
             const pendingUserInputRequests = new Map<string, PendingUserInputRequest>();
+            const activeToolCalls: Array<ClaudeCodeActiveToolCall> = [];
             session.activeTurn = {
               turnId,
               startedAt: nowIso(),
@@ -390,7 +411,7 @@ export const makeClaudeCodeAdapterLive = (options?: ClaudeCodeAdapterLiveOptions
               },
               pendingApprovalRequests,
               pendingUserInputRequests,
-              interrupted: false,
+              activeToolCalls,
             });
             await Effect.runPromise(
               emit(
@@ -459,8 +480,10 @@ export const makeClaudeCodeAdapterLive = (options?: ClaudeCodeAdapterLiveOptions
               session.updatedAt = nowIso();
               const turnState = turnStateByThreadId.get(input.threadId);
               turnStateByThreadId.delete(input.threadId);
+              const expectedExit = expectedExitByThreadId.get(input.threadId);
+              expectedExitByThreadId.delete(input.threadId);
               await turnState?.cleanup();
-              if (code !== 0 && !(turnState?.interrupted && signal === "SIGINT")) {
+              if (code !== 0 && !isExpectedClaudeCodeExit(expectedExit, code, signal)) {
                 session.lastError = `Claude Code exited with code ${code ?? "null"}${signal ? ` (${signal})` : ""}.`;
                 await Effect.runPromise(
                   emit({
@@ -497,7 +520,7 @@ export const makeClaudeCodeAdapterLive = (options?: ClaudeCodeAdapterLiveOptions
             if (!turnState) {
               throw makeSessionNotFound(threadId);
             }
-            turnState.interrupted = true;
+            expectedExitByThreadId.set(threadId, "interrupt");
             turnState.child.kill("SIGINT");
           },
           catch: (cause) =>
@@ -563,6 +586,7 @@ export const makeClaudeCodeAdapterLive = (options?: ClaudeCodeAdapterLiveOptions
           try: async () => {
             const turnState = turnStateByThreadId.get(threadId);
             if (turnState) {
+              expectedExitByThreadId.set(threadId, "stop");
               turnState.child.kill("SIGTERM");
               turnStateByThreadId.delete(threadId);
               await turnState.cleanup();
@@ -597,7 +621,8 @@ export const makeClaudeCodeAdapterLive = (options?: ClaudeCodeAdapterLiveOptions
         Effect.tryPromise({
           try: async () => {
             await Promise.all(
-              [...turnStateByThreadId.values()].map(async (turnState) => {
+              [...turnStateByThreadId.entries()].map(async ([threadId, turnState]) => {
+                expectedExitByThreadId.set(threadId, "stop");
                 turnState.child.kill("SIGTERM");
                 await turnState.cleanup();
               }),

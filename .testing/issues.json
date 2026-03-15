@@ -1,0 +1,32 @@
+[
+  {
+    "id": "blocker-self-testing-build-orchestration-engine",
+    "type": "blocker",
+    "status": "open",
+    "detail": "Top-level `bun run test` fails in `apps/server/integration/orchestrationEngine.integration.test.ts` with 3 failing tests and 1 skipped test."
+  },
+  {
+    "id": "blocker-self-testing-build-checkpoint-reactor",
+    "type": "blocker",
+    "status": "open",
+    "detail": "Top-level `bun run test` fails in `apps/server/src/orchestration/Layers/CheckpointReactor.test.ts` with 2 failing tests."
+  },
+  {
+    "id": "bug-regression-gitcore-timeout",
+    "type": "bug",
+    "status": "open",
+    "detail": "Fresh regression during this check: `apps/server/src/git/Layers/GitCore.test.ts` timed out in `waitFor!` for `refreshes upstream behind count after checkout when remote branch advanced` during the logged `bun run test` rerun."
+  },
+  {
+    "id": "blocker-stale-claude-provider-health-goldens",
+    "type": "blocker",
+    "status": "open",
+    "detail": "All four `features/claude-provider-health/golden/*.json` fixtures are older than associated source/test files and should be re-captured."
+  },
+  {
+    "id": "blocker-rtm-scope-incomplete",
+    "type": "blocker",
+    "status": "open",
+    "detail": "RTM currently tracks only `claude-provider-health`; broader Claude adapter and related feature coverage is not represented."
+  }
+]

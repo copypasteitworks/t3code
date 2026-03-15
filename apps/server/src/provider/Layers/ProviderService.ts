@@ -511,34 +511,36 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
       Effect.gen(function* () {
         const threadIds = yield* directory.listThreadIds();
         const activeSessionsByAdapter = yield* Effect.forEach(adapters, (adapter) =>
-          adapter.listSessions().pipe(
-            Effect.map((sessions) => sessions.map((session) => ({ adapter, session }))),
-          ),
+          adapter
+            .listSessions()
+            .pipe(Effect.map((sessions) => sessions.map((session) => ({ adapter, session })))),
         );
         const activeSessions = activeSessionsByAdapter.flatMap((sessions) => sessions);
         const stoppedAt = new Date().toISOString();
         const persistedThreadIds = new Set<ThreadId>();
 
         yield* Effect.forEach(activeSessions, ({ session }) =>
-          directory.upsert({
-            threadId: session.threadId,
-            provider: session.provider,
-            runtimeMode: session.runtimeMode,
-            status: "stopped",
-            ...(session.resumeCursor !== undefined ? { resumeCursor: session.resumeCursor } : {}),
-            runtimePayload: {
-              ...toRuntimePayloadFromSession(session),
-              activeTurnId: null,
-              lastRuntimeEvent: "provider.stopAll",
-              lastRuntimeEventAt: stoppedAt,
-            },
-          }).pipe(
-            Effect.tap(() =>
-              Effect.sync(() => {
-                persistedThreadIds.add(session.threadId);
-              }),
+          directory
+            .upsert({
+              threadId: session.threadId,
+              provider: session.provider,
+              runtimeMode: session.runtimeMode,
+              status: "stopped",
+              ...(session.resumeCursor !== undefined ? { resumeCursor: session.resumeCursor } : {}),
+              runtimePayload: {
+                ...toRuntimePayloadFromSession(session),
+                activeTurnId: null,
+                lastRuntimeEvent: "provider.stopAll",
+                lastRuntimeEventAt: stoppedAt,
+              },
+            })
+            .pipe(
+              Effect.tap(() =>
+                Effect.sync(() => {
+                  persistedThreadIds.add(session.threadId);
+                }),
+              ),
             ),
-          ),
         ).pipe(Effect.asVoid);
 
         yield* Effect.forEach(adapters, (adapter) => adapter.stopAll()).pipe(Effect.asVoid);

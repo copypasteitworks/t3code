@@ -121,9 +121,7 @@ export function buildClaudeCodeTurnArgs(
   return args;
 }
 
-export function buildClaudeCodeTurnInputLine(
-  input: BuildClaudeCodeTurnInputLineInput,
-): string {
+export function buildClaudeCodeTurnInputLine(input: BuildClaudeCodeTurnInputLineInput): string {
   return JSON.stringify({
     type: "user",
     message: {

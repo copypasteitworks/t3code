@@ -18,22 +18,14 @@ function toPersistenceError(operation: string) {
     });
 }
 
-function decodeProviderKind(
-  providerName: string,
-  operation: string,
-): Effect.Effect<ProviderKind, ProviderSessionDirectoryPersistenceError> {
+function decodeProviderKind(providerName: string): Option.Option<ProviderKind> {
   if (providerName === "codex" || providerName === "claudeCode") {
-    return Effect.succeed(providerName);
+    return Option.some(providerName);
   }
   if (providerName === "claude") {
-    return Effect.succeed("claudeCode");
+    return Option.some("claudeCode");
   }
-  return Effect.fail(
-    new ProviderSessionDirectoryPersistenceError({
-      operation,
-      detail: `Unknown persisted provider '${providerName}'.`,
-    }),
-  );
+  return Option.none();
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -63,18 +55,16 @@ const makeProviderSessionDirectory = Effect.gen(function* () {
         Option.match(runtime, {
           onNone: () => Effect.succeed(Option.none<ProviderRuntimeBinding>()),
           onSome: (value) =>
-            decodeProviderKind(value.providerName, "ProviderSessionDirectory.getBinding").pipe(
-              Effect.map((provider) =>
-                Option.some({
-                  threadId: value.threadId,
-                  provider,
-                  adapterKey: value.adapterKey,
-                  runtimeMode: value.runtimeMode,
-                  status: value.status,
-                  resumeCursor: value.resumeCursor,
-                  runtimePayload: value.runtimePayload,
-                }),
-              ),
+            Effect.succeed(
+              Option.map(decodeProviderKind(value.providerName), (provider) => ({
+                threadId: value.threadId,
+                provider,
+                adapterKey: value.adapterKey,
+                runtimeMode: value.runtimeMode,
+                status: value.status,
+                resumeCursor: value.resumeCursor,
+                runtimePayload: value.runtimePayload,
+              })),
             ),
         }),
       ),
@@ -145,7 +135,11 @@ const makeProviderSessionDirectory = Effect.gen(function* () {
   const listThreadIds: ProviderSessionDirectoryShape["listThreadIds"] = () =>
     repository.list().pipe(
       Effect.mapError(toPersistenceError("ProviderSessionDirectory.listThreadIds:list")),
-      Effect.map((rows) => rows.map((row) => row.threadId)),
+      Effect.map((rows) =>
+        rows.flatMap((row) =>
+          Option.isSome(decodeProviderKind(row.providerName)) ? [row.threadId] : [],
+        ),
+      ),
     );
 
   return {

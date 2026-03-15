@@ -64,6 +64,87 @@ const ReadFromSequenceRequestSchema = Schema.Struct({
 const DEFAULT_READ_FROM_SEQUENCE_LIMIT = 1_000;
 const READ_PAGE_SIZE = 500;
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizePersistedProviderKey(value: unknown): "codex" | "claudeCode" | undefined {
+  if (value === "codex" || value === "claudeCode") {
+    return value;
+  }
+  if (value === "claude") {
+    return "claudeCode";
+  }
+  return undefined;
+}
+
+function sanitizePersistedProviderScopedRecord(
+  value: unknown,
+): Record<string, unknown> | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const sanitized = Object.entries(value).reduce<Record<string, unknown>>((acc, [key, entry]) => {
+    const normalizedKey = normalizePersistedProviderKey(key);
+    if (!normalizedKey) {
+      return acc;
+    }
+    acc[normalizedKey] = entry;
+    return acc;
+  }, {});
+
+  return Object.keys(sanitized).length > 0 ? sanitized : undefined;
+}
+
+function sanitizePersistedTurnStartPayload(payload: unknown): unknown {
+  if (!isRecord(payload)) {
+    return payload;
+  }
+
+  const sanitized: Record<string, unknown> = { ...payload };
+
+  const provider = normalizePersistedProviderKey(sanitized.provider);
+  if (!provider) {
+    delete sanitized.provider;
+  } else {
+    sanitized.provider = provider;
+  }
+
+  if ("providerOptions" in sanitized) {
+    const providerOptions = sanitizePersistedProviderScopedRecord(sanitized.providerOptions);
+    if (!providerOptions) {
+      delete sanitized.providerOptions;
+    } else {
+      sanitized.providerOptions = providerOptions;
+    }
+  }
+
+  if ("modelOptions" in sanitized) {
+    const modelOptions = sanitizePersistedProviderScopedRecord(sanitized.modelOptions);
+    if (!modelOptions) {
+      delete sanitized.modelOptions;
+    } else {
+      sanitized.modelOptions = modelOptions;
+    }
+  }
+
+  return sanitized;
+}
+
+function sanitizePersistedEventRow(
+  row: Schema.Schema.Type<typeof OrchestrationEventPersistedRowSchema>,
+): Schema.Schema.Type<typeof OrchestrationEventPersistedRowSchema> {
+  if (row.type !== "thread.turn-start-requested") {
+    return row;
+  }
+
+  return {
+    ...row,
+    payload: sanitizePersistedTurnStartPayload(row.payload),
+  };
+}
+
 function inferActorKind(
   event: Omit<OrchestrationEvent, "sequence">,
 ): Schema.Schema.Type<typeof OrchestrationActorKind> {
@@ -230,7 +311,7 @@ const makeEventStore = Effect.gen(function* () {
           ),
           Effect.flatMap((rows) =>
             Effect.forEach(rows, (row) =>
-              decodeEvent(row).pipe(
+              decodeEvent(sanitizePersistedEventRow(row)).pipe(
                 Effect.mapError(
                   toPersistenceDecodeError("OrchestrationEventStore.readFromSequence:rowToEvent"),
                 ),

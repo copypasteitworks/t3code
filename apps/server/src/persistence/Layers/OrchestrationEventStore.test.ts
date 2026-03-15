@@ -1,4 +1,4 @@
-import { CommandId, EventId, ProjectId } from "@t3tools/contracts";
+import { CommandId, EventId, ProjectId, ThreadId } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import { Effect, Layer, Schema, Stream } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -115,5 +115,164 @@ layer("OrchestrationEventStore", (it) => {
         );
       }
     }),
+  );
+
+  it.effect("normalizes legacy Claude turn-start events during replay", () =>
+    Effect.gen(function* () {
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const now = new Date().toISOString();
+      const sequenceRows = yield* sql<{ readonly maxSequence: number | null }>`
+        SELECT MAX(sequence) AS "maxSequence"
+        FROM orchestration_events
+      `;
+      const maxSequence = sequenceRows[0]?.maxSequence ?? 0;
+
+      yield* sql`
+        INSERT INTO orchestration_events (
+          event_id,
+          aggregate_kind,
+          stream_id,
+          stream_version,
+          event_type,
+          occurred_at,
+          command_id,
+          causation_event_id,
+          correlation_id,
+          actor_kind,
+          payload_json,
+          metadata_json
+        )
+        VALUES (
+          ${EventId.makeUnsafe("evt-store-legacy-claude-turn-start")},
+          ${"thread"},
+          ${ThreadId.makeUnsafe("thread-legacy-claude")},
+          ${0},
+          ${"thread.turn-start-requested"},
+          ${now},
+          ${CommandId.makeUnsafe("cmd-store-legacy-claude-turn-start")},
+          ${null},
+          ${null},
+          ${"client"},
+          ${JSON.stringify({
+            threadId: ThreadId.makeUnsafe("thread-legacy-claude"),
+            messageId: "msg-legacy-claude",
+            provider: "claude",
+            model: "claude-sonnet-4-6",
+            modelOptions: {
+              claude: {
+                effort: "high",
+              },
+            },
+            providerOptions: {
+              claude: {
+                binaryPath: "claude",
+              },
+            },
+            assistantDeliveryMode: "buffered",
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            createdAt: now,
+          })},
+          ${"{}"}
+        )
+      `;
+
+      const replayed = yield* Stream.runCollect(eventStore.readFromSequence(maxSequence, 10)).pipe(
+        Effect.map((chunk) => Array.from(chunk)),
+      );
+
+      assert.equal(replayed.length, 1);
+      assert.equal(replayed[0]?.type, "thread.turn-start-requested");
+      if (replayed[0]?.type === "thread.turn-start-requested") {
+        assert.equal(replayed[0].payload.provider, "claudeCode");
+        assert.deepEqual(replayed[0].payload.modelOptions, {
+          claudeCode: {
+            effort: "high",
+          },
+        });
+        assert.deepEqual(replayed[0].payload.providerOptions, {
+          claudeCode: {
+            binaryPath: "claude",
+          },
+        });
+      }
+    }),
+  );
+
+  it.effect(
+    "drops unsupported provider payload fields during replay instead of failing startup",
+    () =>
+      Effect.gen(function* () {
+        const eventStore = yield* OrchestrationEventStore;
+        const sql = yield* SqlClient.SqlClient;
+        const now = new Date().toISOString();
+        const sequenceRows = yield* sql<{ readonly maxSequence: number | null }>`
+        SELECT MAX(sequence) AS "maxSequence"
+        FROM orchestration_events
+      `;
+        const maxSequence = sequenceRows[0]?.maxSequence ?? 0;
+
+        yield* sql`
+        INSERT INTO orchestration_events (
+          event_id,
+          aggregate_kind,
+          stream_id,
+          stream_version,
+          event_type,
+          occurred_at,
+          command_id,
+          causation_event_id,
+          correlation_id,
+          actor_kind,
+          payload_json,
+          metadata_json
+        )
+        VALUES (
+          ${EventId.makeUnsafe("evt-store-unsupported-provider-turn-start")},
+          ${"thread"},
+          ${ThreadId.makeUnsafe("thread-unsupported-provider")},
+          ${0},
+          ${"thread.turn-start-requested"},
+          ${now},
+          ${CommandId.makeUnsafe("cmd-store-unsupported-provider-turn-start")},
+          ${null},
+          ${null},
+          ${"client"},
+          ${JSON.stringify({
+            threadId: ThreadId.makeUnsafe("thread-unsupported-provider"),
+            messageId: "msg-unsupported-provider",
+            provider: "unsupported-provider",
+            providerOptions: {
+              unsupportedProvider: {
+                enabled: true,
+              },
+            },
+            modelOptions: {
+              unsupportedProvider: {
+                effort: "high",
+              },
+            },
+            assistantDeliveryMode: "buffered",
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            createdAt: now,
+          })},
+          ${"{}"}
+        )
+      `;
+
+        const replayed = yield* Stream.runCollect(
+          eventStore.readFromSequence(maxSequence, 10),
+        ).pipe(Effect.map((chunk) => Array.from(chunk)));
+
+        assert.equal(replayed.length, 1);
+        assert.equal(replayed[0]?.type, "thread.turn-start-requested");
+        if (replayed[0]?.type === "thread.turn-start-requested") {
+          assert.equal(replayed[0].payload.provider, undefined);
+          assert.equal(replayed[0].payload.providerOptions, undefined);
+          assert.equal(replayed[0].payload.modelOptions, undefined);
+        }
+      }),
   );
 });

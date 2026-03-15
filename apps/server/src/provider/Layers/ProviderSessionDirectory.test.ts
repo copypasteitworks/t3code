@@ -238,4 +238,40 @@ it.layer(makeDirectoryLayer(SqlitePersistenceMemory))("ProviderSessionDirectoryL
         });
       }
     }));
+
+  it("ignores persisted providers that are unsupported on this build", () =>
+    Effect.gen(function* () {
+      const directory = yield* ProviderSessionDirectory;
+      const runtimeRepository = yield* ProviderSessionRuntimeRepository;
+
+      const staleThreadId = ThreadId.makeUnsafe("thread-provider-unsupported");
+      const activeThreadId = ThreadId.makeUnsafe("thread-codex-active");
+
+      yield* runtimeRepository.upsert({
+        threadId: staleThreadId,
+        providerName: "unsupported-provider",
+        adapterKey: "unsupported-provider",
+        runtimeMode: "full-access",
+        status: "running",
+        lastSeenAt: new Date().toISOString(),
+        resumeCursor: { sessionId: "unsupported-session-1" },
+        runtimePayload: { cwd: "/tmp/unsupported-project" },
+      });
+      yield* runtimeRepository.upsert({
+        threadId: activeThreadId,
+        providerName: "codex",
+        adapterKey: "codex",
+        runtimeMode: "full-access",
+        status: "running",
+        lastSeenAt: new Date().toISOString(),
+        resumeCursor: null,
+        runtimePayload: null,
+      });
+
+      const staleBinding = yield* directory.getBinding(staleThreadId);
+      assert.equal(Option.isNone(staleBinding), true);
+
+      const threadIds = yield* directory.listThreadIds();
+      assert.deepEqual(threadIds, [activeThreadId]);
+    }));
 });

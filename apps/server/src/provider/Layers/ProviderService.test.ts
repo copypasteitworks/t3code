@@ -322,6 +322,58 @@ it.effect("ProviderServiceLive keeps persisted resumable sessions on startup", (
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
+it.effect("ProviderServiceLive starts with stale unsupported provider rows in persistence", () =>
+  Effect.gen(function* () {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "t3-provider-service-stale-"));
+    const dbPath = path.join(tempDir, "orchestration.sqlite");
+
+    const codex = makeFakeCodexAdapter();
+    const registry: typeof ProviderAdapterRegistry.Service = {
+      getByProvider: (provider) =>
+        provider === "codex"
+          ? Effect.succeed(codex.adapter)
+          : Effect.fail(new ProviderUnsupportedError({ provider })),
+      listProviders: () => Effect.succeed(["codex"]),
+    };
+
+    const persistenceLayer = makeSqlitePersistenceLive(dbPath);
+    const runtimeRepositoryLayer = ProviderSessionRuntimeRepositoryLive.pipe(
+      Layer.provide(persistenceLayer),
+    );
+    const directoryLayer = ProviderSessionDirectoryLive.pipe(Layer.provide(runtimeRepositoryLayer));
+
+    yield* Effect.gen(function* () {
+      const repository = yield* ProviderSessionRuntimeRepository;
+      yield* repository.upsert({
+        threadId: asThreadId("thread-provider-unsupported"),
+        providerName: "unsupported-provider",
+        adapterKey: "unsupported-provider",
+        runtimeMode: "full-access",
+        status: "running",
+        lastSeenAt: new Date().toISOString(),
+        resumeCursor: { sessionId: "unsupported-session-1" },
+        runtimePayload: { cwd: "/tmp/unsupported-project" },
+      });
+    }).pipe(Effect.provide(runtimeRepositoryLayer));
+
+    const providerLayer = makeProviderServiceLive().pipe(
+      Layer.provide(Layer.succeed(ProviderAdapterRegistry, registry)),
+      Layer.provide(directoryLayer),
+      Layer.provide(AnalyticsService.layerTest),
+    );
+
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        yield* ProviderService;
+      }).pipe(Effect.provide(providerLayer)),
+    );
+
+    assert.equal(codex.startSession.mock.calls.length, 0);
+
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
 it.effect(
   "ProviderServiceLive restores rollback routing after restart using persisted thread mapping",
   () =>
@@ -579,105 +631,107 @@ routing.layer("ProviderServiceLive routing", (it) => {
     }),
   );
 
-  it.effect("passes Claude runtime payload through recovery so resumed sessions can use --resume", () =>
-    Effect.gen(function* () {
-      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "t3-provider-service-claude-"));
-      const dbPath = path.join(tempDir, "orchestration.sqlite");
-      const persistenceLayer = makeSqlitePersistenceLive(dbPath);
-      const runtimeRepositoryLayer = ProviderSessionRuntimeRepositoryLive.pipe(
-        Layer.provide(persistenceLayer),
-      );
-      const directoryLayer = ProviderSessionDirectoryLive.pipe(
-        Layer.provide(runtimeRepositoryLayer),
-      );
+  it.effect(
+    "passes Claude runtime payload through recovery so resumed sessions can use --resume",
+    () =>
+      Effect.gen(function* () {
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "t3-provider-service-claude-"));
+        const dbPath = path.join(tempDir, "orchestration.sqlite");
+        const persistenceLayer = makeSqlitePersistenceLive(dbPath);
+        const runtimeRepositoryLayer = ProviderSessionRuntimeRepositoryLive.pipe(
+          Layer.provide(persistenceLayer),
+        );
+        const directoryLayer = ProviderSessionDirectoryLive.pipe(
+          Layer.provide(runtimeRepositoryLayer),
+        );
 
-      const claude = makeFakeCodexAdapter("claudeCode");
-      const registry: typeof ProviderAdapterRegistry.Service = {
-        getByProvider: (provider) =>
-          provider === "claudeCode"
-            ? Effect.succeed(claude.adapter)
-            : Effect.fail(new ProviderUnsupportedError({ provider })),
-        listProviders: () => Effect.succeed(["claudeCode"]),
-      };
-      const providerLayer = makeProviderServiceLive().pipe(
-        Layer.provide(Layer.succeed(ProviderAdapterRegistry, registry)),
-        Layer.provide(directoryLayer),
-        Layer.provide(AnalyticsService.layerTest),
-      );
-
-      yield* Effect.gen(function* () {
-        const directory = yield* ProviderSessionDirectory;
-        yield* directory.upsert({
-          provider: "claudeCode",
-          threadId: asThreadId("thread-claude-recover"),
-          runtimeMode: "full-access",
-          status: "stopped",
-          resumeCursor: {
-            sessionId: "sess-claude-1",
-          },
-          runtimePayload: {
-            cwd: "/tmp/project-claude",
-            sessionId: "sess-claude-1",
-            lastCompletedTurnAt: "2026-03-15T14:00:00.000Z",
-            providerOptions: {
-              claudeCode: {
-                binaryPath: "/tmp/t3-claude-wrapper.cjs",
-                settingSources: ["user"],
-              },
-            },
-          },
-        });
-      }).pipe(Effect.provide(directoryLayer));
-
-      yield* Effect.gen(function* () {
-        const provider = yield* ProviderService;
-        yield* provider.sendTurn({
-          threadId: asThreadId("thread-claude-recover"),
-          input: "resume",
-          attachments: [],
-        });
-      }).pipe(Effect.provide(providerLayer));
-
-      assert.equal(claude.startSession.mock.calls.length, 1);
-      const resumedStartInput = claude.startSession.mock.calls[0]?.[0];
-      assert.equal(typeof resumedStartInput === "object" && resumedStartInput !== null, true);
-      if (resumedStartInput && typeof resumedStartInput === "object") {
-        const startPayload = resumedStartInput as {
-          provider?: string;
-          cwd?: string;
-          resumeCursor?: unknown;
-          threadId?: string;
-          providerOptions?: unknown;
+        const claude = makeFakeCodexAdapter("claudeCode");
+        const registry: typeof ProviderAdapterRegistry.Service = {
+          getByProvider: (provider) =>
+            provider === "claudeCode"
+              ? Effect.succeed(claude.adapter)
+              : Effect.fail(new ProviderUnsupportedError({ provider })),
+          listProviders: () => Effect.succeed(["claudeCode"]),
         };
-        assert.equal(startPayload.provider, "claudeCode");
-        assert.equal(startPayload.cwd, "/tmp/project-claude");
-        assert.equal(startPayload.threadId, "thread-claude-recover");
-        assert.deepEqual(startPayload.providerOptions, {
-          claudeCode: {
-            binaryPath: "/tmp/t3-claude-wrapper.cjs",
-            settingSources: ["user"],
-          },
-        });
-        assert.deepEqual(startPayload.resumeCursor, {
-          resumeCursor: {
-            sessionId: "sess-claude-1",
-          },
-          runtimePayload: {
-            cwd: "/tmp/project-claude",
-            sessionId: "sess-claude-1",
-            lastCompletedTurnAt: "2026-03-15T14:00:00.000Z",
-            providerOptions: {
-              claudeCode: {
-                binaryPath: "/tmp/t3-claude-wrapper.cjs",
-                settingSources: ["user"],
+        const providerLayer = makeProviderServiceLive().pipe(
+          Layer.provide(Layer.succeed(ProviderAdapterRegistry, registry)),
+          Layer.provide(directoryLayer),
+          Layer.provide(AnalyticsService.layerTest),
+        );
+
+        yield* Effect.gen(function* () {
+          const directory = yield* ProviderSessionDirectory;
+          yield* directory.upsert({
+            provider: "claudeCode",
+            threadId: asThreadId("thread-claude-recover"),
+            runtimeMode: "full-access",
+            status: "stopped",
+            resumeCursor: {
+              sessionId: "sess-claude-1",
+            },
+            runtimePayload: {
+              cwd: "/tmp/project-claude",
+              sessionId: "sess-claude-1",
+              lastCompletedTurnAt: "2026-03-15T14:00:00.000Z",
+              providerOptions: {
+                claudeCode: {
+                  binaryPath: "/tmp/t3-claude-wrapper.cjs",
+                  settingSources: ["user"],
+                },
               },
             },
-          },
-        });
-      }
+          });
+        }).pipe(Effect.provide(directoryLayer));
 
-      fs.rmSync(tempDir, { recursive: true, force: true });
-    }).pipe(Effect.provide(NodeServices.layer)),
+        yield* Effect.gen(function* () {
+          const provider = yield* ProviderService;
+          yield* provider.sendTurn({
+            threadId: asThreadId("thread-claude-recover"),
+            input: "resume",
+            attachments: [],
+          });
+        }).pipe(Effect.provide(providerLayer));
+
+        assert.equal(claude.startSession.mock.calls.length, 1);
+        const resumedStartInput = claude.startSession.mock.calls[0]?.[0];
+        assert.equal(typeof resumedStartInput === "object" && resumedStartInput !== null, true);
+        if (resumedStartInput && typeof resumedStartInput === "object") {
+          const startPayload = resumedStartInput as {
+            provider?: string;
+            cwd?: string;
+            resumeCursor?: unknown;
+            threadId?: string;
+            providerOptions?: unknown;
+          };
+          assert.equal(startPayload.provider, "claudeCode");
+          assert.equal(startPayload.cwd, "/tmp/project-claude");
+          assert.equal(startPayload.threadId, "thread-claude-recover");
+          assert.deepEqual(startPayload.providerOptions, {
+            claudeCode: {
+              binaryPath: "/tmp/t3-claude-wrapper.cjs",
+              settingSources: ["user"],
+            },
+          });
+          assert.deepEqual(startPayload.resumeCursor, {
+            resumeCursor: {
+              sessionId: "sess-claude-1",
+            },
+            runtimePayload: {
+              cwd: "/tmp/project-claude",
+              sessionId: "sess-claude-1",
+              lastCompletedTurnAt: "2026-03-15T14:00:00.000Z",
+              providerOptions: {
+                claudeCode: {
+                  binaryPath: "/tmp/t3-claude-wrapper.cjs",
+                  settingSources: ["user"],
+                },
+              },
+            },
+          });
+        }
+
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }).pipe(Effect.provide(NodeServices.layer)),
   );
 
   it.effect("lists no sessions after adapter runtime clears", () =>
@@ -808,7 +862,10 @@ routing.layer("ProviderServiceLive routing", (it) => {
         assert.equal(runtime.value.status, "stopped");
         assert.deepEqual(runtime.value.resumeCursor, { sessionId: "sess-claude-stopall" });
         const payload = runtime.value.runtimePayload;
-        assert.equal(payload !== null && typeof payload === "object" && !Array.isArray(payload), true);
+        assert.equal(
+          payload !== null && typeof payload === "object" && !Array.isArray(payload),
+          true,
+        );
         if (payload !== null && typeof payload === "object" && !Array.isArray(payload)) {
           const record = payload as Record<string, unknown>;
           assert.equal(record.cwd, "/tmp/project-claude");
